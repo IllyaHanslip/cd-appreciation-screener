@@ -86,8 +86,45 @@ def test_shared_currency_moves_are_removed():
     first = adj.groupby("release_id").first()
     change = (last["adj_price"] / first["price"] - 1) * 100
     assert change.loc[1:31].abs().max() < 1e-9  # shared moves and rounding: no own change
-    assert 8 < change.loc[32] < 10  # the real move survives (minus the nearest shared move)
+    assert change.loc[32] == pytest.approx(10.0)  # a real move, currency group unknown: kept whole
     assert last.loc[1, "price"] == round(21 * 1.0133, 2)  # raw prices are untouched
+
+
+def test_genuine_move_subtracts_its_own_currency_group():
+    """A CD that co-moved with a group, then moves for real, loses only its group's move."""
+    rows = []
+    for rid in range(1, 11):  # a "dollar" group: +1.33% on day 2, +1.0% on day 3
+        p = 30.0 + rid
+        rows += [(rid, T0, p, "GBP"), (rid, T0 + days(1), round(p * 1.0133, 2), "GBP"),
+                 (rid, T0 + days(2), round(p * 1.0133 * 1.01, 2), "GBP")]
+    for rid in range(11, 19):  # a "euro" group: +0.22% on day 2, -0.5% on day 3
+        p = 40.0 + rid
+        rows += [(rid, T0, p, "GBP"), (rid, T0 + days(1), round(p * 1.0022, 2), "GBP"),
+                 (rid, T0 + days(2), round(p * 1.0022 * 0.995, 2), "GBP")]
+    # Release 99 moves with the dollar group on day 2, then rises 10% for real on day 3.
+    rows += [(99, T0, 60.0, "GBP"), (99, T0 + days(1), round(60 * 1.0133, 2), "GBP"),
+             (99, T0 + days(2), round(60 * 1.0133 * 1.01 * 1.10, 2), "GBP")]
+    adj = analytics.remove_shared_moves(history(rows))
+    own = adj[adj.release_id == 99]["adj_price"].iloc[-1] / 60.0 - 1
+    assert own * 100 == pytest.approx(10.0, abs=0.1)  # the 1% dollar move is not counted
+
+
+def test_genuine_moves_are_not_mistaken_for_currency_moves():
+    """When many CDs move for their own reasons, busy stretches are not 'shared moves'."""
+    rng = np.random.default_rng(7)
+    moves = rng.normal(0.0005, 0.01, 300)  # every CD moves by its own random amount
+    rows = []
+    for rid, move in enumerate(moves, start=1):
+        p1 = round(float(rng.uniform(25, 150)), 2)
+        rows += [(rid, T0, p1, "GBP"), (rid, T0 + days(1), round(p1 * math.exp(move), 2), "GBP")]
+    adj = analytics.remove_shared_moves(history(rows))
+    first = adj.groupby("release_id").first()
+    last = adj.groupby("release_id").last()
+    raw = np.log(last["price"] / first["price"]) * 100
+    own = np.log(last["adj_price"] / first["price"]) * 100
+    assert analytics._shared_moves(raw, last["price"], tolerance=0.05, min_members=4,
+                                   min_share=0.02) == []  # no false currency clusters
+    assert np.allclose(own, raw)  # every genuine move is kept in full
 
 
 def test_growth_metrics_ignore_currency_moves():

@@ -455,7 +455,7 @@
     const lastObs = history.length ? history[history.length - 1] : null;
     const currency = (metrics && metrics.currency) || (lastObs && lastObs.currency) || "USD";
     parts.push(pressingSection(release));
-    if (metrics) parts.push(marketSection(metrics, listing, album, checks));
+    if (metrics) parts.push(marketSection(metrics, listing, album, checks, release.discogs_url));
     parts.push(metrics
       ? metricsGrid(release, metrics)
       : el("p", { class: "note", text: "No Near Mint price data for this release yet." }));
@@ -490,7 +490,13 @@
   }
 
   /** NM estimate vs. what copies are really listed for - this pressing and the whole album. */
-  function marketSection(m, listing, album, checks) {
+  /** "Data provided by Discogs", linked to the Discogs page the data comes from (API terms). */
+  function attribution(url) {
+    return el("p", { class: "attribution" }, "Data provided by ",
+      el("a", { href: url || "https://www.discogs.com", target: "_blank", rel: "noopener", text: "Discogs" }), ".");
+  }
+
+  function marketSection(m, listing, album, checks, discogsUrl) {
     const cur = m.currency;
     const row = (label, value, note) => el("tr", {},
       el("th", { scope: "row", text: label }),
@@ -521,6 +527,7 @@
         row("Discogs NM estimate", fmtMoney(m.current_price, cur), "suggested price, Near Mint, this pressing"),
         row("Cheapest listing", listed[0], listed[1]),
         row("Album, any pressing", albumRow[0], albumRow[1]))),
+      attribution(discogsUrl),
       ...notes.map((text) => el("p", { class: "callout", text })));
   }
 
@@ -960,6 +967,7 @@
               a.usual_price != null ? "median of the previous 30 days" : "after 3+ days of checks"),
             row("Change since tracked", a.change_pct != null ? fmtSignedPct(a.change_pct) : "—",
               `${a.days_tracked} day${a.days_tracked === 1 ? "" : "s"} of checks`))),
+          attribution(a.album_url),
           a.deal ? el("p", { class: "callout", text: `Deal: the cheapest copy is ${Math.round(a.below_usual_pct)}% below its usual price. Check that it's a CD you want.` }) : null,
           el("p", { class: "links" },
             el("a", { href: a.cd_listings_url, target: "_blank", rel: "noopener", text: "CD listings for this album ↗" }),
@@ -1303,7 +1311,7 @@
     $("index-table").replaceChildren(
       el("thead", {}, el("tr", {},
         el("th", { scope: "col", text: "Date" }), el("th", { scope: "col", class: "num", text: "Own moves" }),
-        el("th", { scope: "col", class: "num", text: "Raw £" }), el("th", { scope: "col", class: "num", text: "CDs" }))),
+        el("th", { scope: "col", class: "num", text: "Raw" }), el("th", { scope: "col", class: "num", text: "CDs" }))),
       el("tbody", {}, ...pts.slice().reverse().map((p) => el("tr", {},
         el("td", { text: fmtDate(p.date) }), el("td", { class: "num", text: p.index.toFixed(2) }),
         el("td", { class: "num", text: p.raw_index.toFixed(2) }), el("td", { class: "num", text: p.cds })))));
@@ -1365,7 +1373,7 @@
     const row = (cls, value, label) => el("div", { class: "tooltip-row" },
       el("span", { class: `key-line ${cls}` }), el("strong", { text: value.toFixed(2) }), el("span", { text: label }));
     g.tooltip.replaceChildren(
-      row("key-1", p.index, "own moves"), row("key-2", p.raw_index, "raw £"),
+      row("key-1", p.index, "own moves"), row("key-2", p.raw_index, "raw prices"),
       el("span", { text: `${fmtDate(p.date)} · ${p.cds} CDs` }));
     placeTooltip(g.tooltip, g.x(i), g.y(Math.max(p.index, p.raw_index)), g.width);
   }
@@ -1567,7 +1575,9 @@
     loadLeaderboard();
     loadReport();
     let savedTab = location.hash.slice(1); // e.g. /#wantlist
-    if (!TABS.includes(savedTab)) {
+    if (location.hash.startsWith("#release-")) {
+      savedTab = "screener"; // a link to a release always shows it over the screener
+    } else if (!TABS.includes(savedTab)) {
       try { savedTab = localStorage.getItem("cd-screener-tab"); } catch (e) { /* storage unavailable */ }
     }
     if (TABS.includes(savedTab) && savedTab !== "screener") showTab(savedTab);

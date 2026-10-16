@@ -1,17 +1,82 @@
 # CD Market Appreciation Screener
 
-Finds physical music CDs that are **scarce** (many more people want them than own them)
-and **appreciating** (their Near Mint market price is rising), using a three-stage data
-funnel and an interactive leaderboard.
+A data pipeline and dashboard that finds physical music CDs that are **scarce** (far more
+collectors want them than own them) and tracks whether they are **appreciating**, using
+live data from the Discogs marketplace API.
+
+> This application uses Discogs' API but is not affiliated with, sponsored or endorsed by
+> Discogs. 'Discogs' is a trademark of Zink Media, LLC. Data provided by
+> [Discogs](https://www.discogs.com).
+
+![Dashboard: funnel, weekly report, market overview charts and the ranked leaderboard](docs/images/dashboard.png)
+
+*Screenshots are from the built-in demo mode, so every artist, title and price in them is
+fictional. Real Discogs prices are kept on my own machine and never published (see
+[Discogs data and terms](#discogs-data-and-terms)).*
+
+## Why I built this
+
+I collect CDs, and the market for out-of-print pressings behaves like a small, illiquid
+asset market. Prices vary widely between pressings of the same album, many CDs rarely sell,
+and listing prices are noisy. I wanted to answer a data question with real data: **can
+community demand (want/have) identify CDs before their prices rise?** This repository is
+the measurement system for that question. It ingests, cleans and scores the market every
+day, so the hypothesis can be tested once enough history exists.
+
+## Early findings (16 Oct 2026: 243 scarce CDs, 2 days of prices)
+
+These compare price *levels* across CDs, which two days of data can support. Claims about
+price *changes* wait for a month of history. They are summary statistics only: no
+Discogs price data is published in this repository.
+
+- **Scarcity is barely priced in.** The rank correlation between want/have ratio and
+  Near Mint estimate is only **0.12**, so scarce CDs are not systematically more expensive.
+  That gap is what the screener looks for.
+- **Style matters more than scarcity.** Median want/have is similar across styles (2.6–3.8×),
+  but the median Near Mint estimate in the most expensive style (City Pop) is **almost 3×**
+  that of the cheapest (IDM).
+- **Japanese pressings carry a premium.** They make up 37% of the scarce CDs, and their
+  median estimate is **about 60% higher** than that of other pressings.
+- **Value often belongs to one variant, not the album.** For 68 of 153 CDs, the pressing's
+  estimate is at least 3× the album's cheapest copy, and over 50× in the most extreme case.
+- **Marketplace estimates are noisy in thin markets.** Where copies are for sale, Discogs'
+  estimate is ≥ 1.5× the cheapest listing for 37% of CDs, yet *below* it for 45%.
+  90 of the 243 CDs had no copies for sale at all.
+- **Exchange rates hide inside the prices.** On day two, 213 of 237 CDs' GBP estimates
+  moved, but only 5 moved once shared currency movements were removed. Without that
+  correction, "appreciation" would mostly measure exchange rates.
+
+**Next:** test whether the Scarcity Index predicts realised appreciation, once a month
+of daily data exists (mid-November 2026).
+
+![Release detail (demo data): pressing details, a market check and the price history](docs/images/release-detail.png)
+
+## What it demonstrates
+
+- **Data engineering:** daily incremental ingestion from a rate-limited REST API. It
+  throttles proactively, slows down when the rate-limit headers say to, and backs off
+  exponentially with jitter on 429 and 5xx errors. Runs are idempotent and resumable,
+  and the SQLite schema (generated columns, in-place migrations) separates facts,
+  operational logs and derived snapshots.
+- **Analytics (pandas):** as-of joins for 30-day growth, a least-squares log-price trend,
+  a percentile-based composite score, detection and removal of shared currency moves,
+  and deal and reissue signals.
+- **Product:** a Flask JSON API and a dependency-free JavaScript dashboard with
+  accessible SVG charts, frozen weekly reports, and a Windows scheduled job with desktop
+  notifications.
+- **Quality:** 69 automated tests that never touch the network; rate-limit and retry
+  behaviour is tested with a fake clock.
 
 ```
- Discogs metadata ──► SQLite ──► funnel filter ──► rate-limited price ──► pandas ──► Flask API + dashboard
- (simulated dump      releases   format = 'CD'     worker (Discogs       metrics     "CD Appreciation
-  or live search)                want/have > 2.0   price suggestions)               Leaderboard"
-   ~5,000 releases               ~400 flagged      top 300 priced daily  scored
+ Discogs search ──► SQLite ──► funnel filter ──────► rate-limited daily ──► pandas ─────► Flask API + dashboard
+ (8 collector       releases   CD, want/have > 2,    price + listing        metrics and   leaderboard, charts,
+  styles)                      ≥ 25 wants            checks                 signals       weekly report
+ 6,776 releases                274 flagged           243 priced
 ```
 
 Stack: Python 3.10+, SQLite, pandas, requests, Flask, plain HTML/CSS/JS (no Node, no build step).
+Licensed under the [MIT License](LICENSE) (the code only; Discogs data is subject to the
+[Discogs API Terms of Use](https://support.discogs.com/hc/en-us/articles/360009334593-API-Terms-of-Use)).
 
 ---
 
@@ -141,7 +206,7 @@ python -m cd_screener --db other.db serve --port 8080
 | Absolute change | `current − baseline` |
 | % appreciation | `(current − baseline) / baseline × 100` |
 | 30-day growth | Change vs. the last observation at least 30 days before the latest one, with **shared currency moves removed** (see below). Shown as "—" until there is ~30 days of history. |
-| Shared-move removal | Discogs converts each estimate into your account currency daily, so exchange-rate changes move many CDs by the same % on the same day. Each day, clusters of identical moves (≥4 CDs and ≥2% of the day's CDs, within 0.05%) are treated as currency effects and removed. Appreciation, growth and trend use the adjusted prices; the raw figures are shown alongside. |
+| Shared-move removal | Discogs converts each estimate into your account currency daily, so exchange-rate changes move many CDs by exactly the same % on the same day. Each day, a group of identical moves (within 0.05%, at least 4 CDs and 2% of the day's CDs) counts as a currency effect only if it is a statistically significant spike against nearby moves (Poisson test, p < 0.001) and the groups together explain at least 30% of the day's CDs. Grouped CDs count as unchanged and remember who they moved with. When a CD later moves for its own reasons, only its own currency group's move is subtracted. Appreciation, growth and trend use the adjusted prices; the raw figures are shown alongside. |
 | Trend velocity | Least-squares slope of `ln(price)` over the last 90 days, expressed as % per 30 days. It uses every point, so it is less noisy than a two-point comparison. |
 | Scarcity Index (0–100) | `100 × (0.5 × demand percentile + 0.5 × momentum percentile)`. Demand is the release's want/have rank among priced CDs; momentum is its velocity rank. A release without enough history counts as neutral (50th percentile). |
 
@@ -209,11 +274,37 @@ they never touch the network or actually wait out a rate limit.
 
 ---
 
+## Discogs data and terms
+
+This is a **personal, non-commercial project**: nothing is sold, no fee is charged, and
+no data is shared. It uses the Discogs API under the
+[Discogs API Terms of Use](https://support.discogs.com/hc/en-us/articles/360009334593-API-Terms-of-Use).
+Discogs classifies marketplace data (price suggestions, listings, sales history) and user
+data (usernames, wantlists, collections) as **Restricted Data**. It may not be transferred
+to third parties, or displayed once it is more than six hours older than the information
+on Discogs. So:
+
+- **Published here:** the code, tests, documentation and demo screenshots (fictional data).
+- **Never published:** the database (prices, listings, wantlist, collection), the weekly
+  reports and the logs. They are git-ignored and stay on the machine that runs the tool.
+- **Attribution:** the dashboard and reports show the required notice and
+  "Data provided by Discogs", with links back to the relevant Discogs pages.
+- **Price history:** keeping a history of prices for analysis is a grey area in the terms
+  ("You may not cache or store the Content longer than is necessary to provide a service
+  to Your application's users"). The tool therefore runs privately, and a public live
+  version would only be built with Discogs' permission.
+
+This application uses Discogs' API but is not affiliated with, sponsored or endorsed by
+Discogs. 'Discogs' is a trademark of Zink Media, LLC.
+
+---
+
 ## Notes and limitations
 
-- **Simulated data is fictional.** Demo artists, titles and prices are generated.
-  Simulated release IDs start at 90,000,001, and the live worker refuses to send them to
-  Discogs.
+- **Demo mode uses fictional data.** The offline `demo` and `seed` commands generate
+  made-up artists, titles and prices, so the project runs without a Discogs account. The
+  findings above come from live Discogs data. Simulated release IDs start at 90,000,001,
+  and the live worker refuses to send them to Discogs.
 - **"Median" vs. price suggestion.** The Discogs website shows a sales-history median,
   but the public API does not expose it. The closest condition-specific figure it offers
   is the *price suggestion* for each grade, which is based on past sales. This app tracks

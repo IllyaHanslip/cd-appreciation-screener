@@ -172,6 +172,8 @@ def test_summary_and_genres(client):
 def test_dashboard_is_served(client):
     page = client.get("/")
     assert page.status_code == 200 and b"CD Appreciation Leaderboard" in page.data
+    assert b"not affiliated with, sponsored or endorsed by Discogs" in page.data  # API terms notice
+    assert b"trademark of Zink Media, LLC" in page.data
     assert client.get("/static/app.js").status_code == 200
 
 

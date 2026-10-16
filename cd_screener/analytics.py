@@ -58,25 +58,49 @@ def load_releases(conn: sqlite3.Connection) -> pd.DataFrame:
     return pd.read_sql_query("SELECT release_id, want_have_ratio FROM releases", conn)
 
 
+def _poisson_tail(k: int, lam: float) -> float:
+    """P(X >= k) for X ~ Poisson(lam)."""
+    term, cdf = math.exp(-lam), 0.0
+    for i in range(k):
+        cdf += term
+        term *= lam / (i + 1)
+    return max(0.0, 1.0 - cdf)
+
+
 def _shared_moves(returns: pd.Series, prices: pd.Series, *, tolerance: float,
-                  min_members: int, min_share: float) -> list[float]:
+                  min_members: int, min_share: float, neighbourhood: int = 10,
+                  alpha: float = 1e-3) -> list[float]:
     """Find % moves that many releases made identically on the same day.
 
     Discogs computes each suggestion in some underlying currency and converts it to the
     account currency daily, so releases sharing a currency move in lockstep. Only prices of
     at least 20 are used to locate the clusters, where 1-cent rounding is below 0.05%.
+
+    A shared move must be a statistically significant *spike*: given how many releases
+    moved by similar amounts in the surrounding +/- (neighbourhood x tolerance) range,
+    seeing this many inside the +/- tolerance window by chance must have probability
+    below `alpha`. On days when many releases move for their own reasons, chance
+    groupings in that spread are therefore not mistaken for currency effects.
     """
     precise = returns[prices >= 20].sort_values().to_numpy()
     threshold = max(min_members, min_share * len(returns))
+    candidates = precise  # windows still to examine
+    reference = precise  # background for the significance test (minus accepted spikes)
     moves = []
-    while len(precise):
-        counts = [np.sum(np.abs(precise - r) <= tolerance) for r in precise]
+    while len(candidates):
+        counts = [np.sum(np.abs(candidates - r) <= tolerance) for r in candidates]
         best = int(np.argmax(counts))
         if counts[best] < threshold:
             break
-        members = np.abs(precise - precise[best]) <= tolerance
-        moves.append(float(np.median(precise[members])))
-        precise = precise[~members]
+        centre = candidates[best]
+        in_window = int(np.sum(np.abs(reference - centre) <= tolerance))
+        nearby = np.sum(np.abs(reference - centre) <= tolerance * neighbourhood)
+        background = max((nearby - in_window) / (neighbourhood - 1), 0.5)  # expected by chance
+        members = np.abs(candidates - centre) <= tolerance
+        if _poisson_tail(in_window, background) < alpha:
+            moves.append(float(np.median(candidates[members])))
+            reference = reference[np.abs(reference - centre) > tolerance]
+        candidates = candidates[~members]
     return moves
 
 
@@ -86,12 +110,17 @@ def remove_shared_moves(
     tolerance_pct: float = config.SHARED_MOVE_TOLERANCE_PCT,
     min_members: int = config.SHARED_MOVE_MIN_MEMBERS,
     min_share: float = config.SHARED_MOVE_MIN_SHARE,
+    min_explained: float = config.SHARED_MOVE_MIN_EXPLAINED,
 ) -> pd.DataFrame:
     """Add `adj_price`: the price path with market-wide (currency) moves taken out.
 
-    For each pair of consecutive observation dates, releases whose change matches a
-    shared move (within rounding) count as unchanged; others keep their own change minus
-    the nearest shared move. The adjusted path starts at the first real price.
+    For each pair of consecutive observation dates (oldest first):
+    * releases whose change matches a shared move (within rounding) count as unchanged,
+      and remember who they moved with - their currency group;
+    * releases that changed for their own reasons keep their change, minus that day's move
+      of *their own* currency group (the shared move most of their previous co-movers
+      made). If their group is unknown, nothing is subtracted.
+    The adjusted path starts at the first real price.
     """
     h = history.sort_values(["release_id", "fetched_at"], kind="mergesort").copy()
     grouped = h.groupby("release_id")
@@ -104,16 +133,47 @@ def remove_shared_moves(
         ret = np.log(s["price"] / s["prev_price"]) * 100
         pair = s["prev_at"].dt.strftime("%Y-%m-%d") + ">" + s["fetched_at"].dt.strftime("%Y-%m-%d")
         adjusted = pd.Series(0.0, index=s.index)
-        for _, idx in pair.groupby(pair).groups.items():
-            day_ret, day_price, day_prev = ret[idx], s.loc[idx, "price"], s.loc[idx, "prev_price"]
-            moves = np.array([0.0] + _shared_moves(day_ret, day_price, tolerance=tolerance_pct,
-                                                   min_members=min_members, min_share=min_share))
-            nearest = moves[np.abs(day_ret.to_numpy()[:, None] - moves[None, :]).argmin(axis=1)]
-            expected = day_prev.to_numpy() * np.exp(nearest / 100)
-            # Explained by the shared move if within a cent (rounding) or the tolerance.
-            slack = np.maximum(0.011, day_price.to_numpy() * tolerance_pct / 100)
-            explained = np.abs(day_price.to_numpy() - expected) <= slack
-            adjusted[idx] = np.where(explained, 0.0, day_ret.to_numpy() - nearest)
+        co_movers: dict[int, set] = {}  # release -> releases it last moved in lockstep with
+        for _, idx in sorted(pair.groupby(pair).groups.items()):  # chronological
+            r = ret[idx].to_numpy()
+            price = s.loc[idx, "price"].to_numpy()
+            prev = s.loc[idx, "prev_price"].to_numpy()
+            rids = s.loc[idx, "release_id"].to_numpy()
+            moves = _shared_moves(ret[idx], s.loc[idx, "price"], tolerance=tolerance_pct,
+                                  min_members=min_members, min_share=min_share)
+
+            def matches(move: float) -> np.ndarray:
+                # "Unchanged" means the same price to the penny (an estimate that did not
+                # move is identical day to day); a shared move allows a cent of rounding
+                # plus its tolerance, since conversions round in two currencies.
+                slack = 0.005 if move == 0.0 else np.maximum(0.011, price * tolerance_pct / 100)
+                return np.abs(price - prev * np.exp(move / 100)) <= slack
+
+            unchanged = matches(0.0)
+            explained = {m: matches(m) & ~unchanged for m in moves}
+            # Currency days look like a few groups explaining most CDs. If the candidate
+            # groups explain only a small share, the CDs moved for their own reasons and
+            # any "groups" are chance groupings: keep every move.
+            share = (unchanged | np.logical_or.reduce(list(explained.values()) or [unchanged])).mean()
+            if moves and share < min_explained:
+                moves, explained = [], {}
+            groups = {m: set(rids[mask]) for m, mask in explained.items()}
+            out = np.zeros(len(r))
+            for i, rid in enumerate(rids):
+                if unchanged[i]:
+                    continue
+                hit = next((m for m in moves if explained[m][i]), None)
+                if hit is not None:
+                    co_movers[rid] = groups[hit] - {rid}
+                    continue
+                # A genuine move: subtract the move its own currency group made today.
+                group_move, overlap = 0.0, 0
+                for m, members in groups.items():
+                    shared = len(co_movers.get(rid, set()) & members)
+                    if shared > overlap:
+                        group_move, overlap = m, shared
+                out[i] = r[i] - (group_move if overlap >= 3 else 0.0)
+            adjusted[idx] = out
         h.loc[steps, "adj_ret"] = adjusted
     first_price = h.groupby("release_id")["price"].transform("first")
     h["adj_price"] = first_price * np.exp(h.groupby("release_id")["adj_ret"].cumsum() / 100)

@@ -165,7 +165,10 @@ def to_markdown(r: dict) -> str:
         for i in r["supply"]]), ""] if r["supply"] else ["_No changes in copies for sale._", ""]
     out += ["---", "", "Method: Near Mint estimates are Discogs marketplace price suggestions for "
             "the exact pressing; listings are the cheapest copy for sale in any condition. "
-            "Data provided by [Discogs](https://www.discogs.com).", ""]
+            "Data provided by [Discogs](https://www.discogs.com).", "",
+            "This application uses Discogs' API but is not affiliated with, sponsored or endorsed "
+            "by Discogs. 'Discogs' is a trademark of Zink Media, LLC. Discogs marketplace data is "
+            "for personal use: do not republish this report.", ""]
     return "\n".join(out)
 
 

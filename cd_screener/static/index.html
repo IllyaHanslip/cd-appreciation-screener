@@ -62,7 +62,7 @@
           </label>
           <label class="field field-check"><input type="checkbox" id="want-deals-only"> Only albums below their usual price</label>
         </section>
-        <p class="note view-note">Your wantlist grouped by album: all the variants you want of an album are priced together, once a day. <strong>Cheapest copy</strong> is Discogs&rsquo; album-wide lowest price (any pressing or format) &mdash; use <strong>CD listings</strong> for CD-only offers.</p>
+        <p class="note view-note">Your wantlist grouped by album: all the variants you want of an album are priced together, once a day. <strong>Cheapest copy</strong> is Discogs&rsquo; album-wide lowest price (any pressing or format) &mdash; use <strong>CD listings</strong> for CD-only offers. Data provided by <a href="https://www.discogs.com/mywantlist">Discogs</a>.</p>
         <div class="table-wrap">
           <table class="leaderboard" id="want-table">
             <thead><tr>
@@ -88,7 +88,7 @@
         <figure class="chart-card card" id="col-chart-card">
           <figcaption>
             <span class="chart-title">Collection value over time</span>
-            <span class="chart-sub">Discogs&rsquo; median estimate, based on recent sales of your exact pressings</span>
+            <span class="chart-sub">Discogs&rsquo; median estimate, based on recent sales of your exact pressings &middot; Data provided by <a href="https://www.discogs.com">Discogs</a></span>
           </figcaption>
           <div id="col-chart"></div>
         </figure>
@@ -217,7 +217,7 @@
             </figcaption>
             <div class="legend" aria-hidden="true">
               <span class="legend-item"><span class="key-line key-1"></span>Own price moves (currency removed)</span>
-              <span class="legend-item"><span class="key-line key-2"></span>Raw &pound; prices</span>
+              <span class="legend-item"><span class="key-line key-2"></span>Raw prices (incl. currency moves)</span>
             </div>
             <div class="chart" id="index-chart" tabindex="0" role="group"
                  aria-label="Market index over time. Arrow keys read values."></div>
@@ -232,7 +232,7 @@
         <div class="board-meta">
           <h2 id="board-title" class="sr-only">Leaderboard</h2>
           <span id="result-count" aria-live="polite"></span>
-          <span class="board-hint">Click a row for price history</span>
+          <span class="board-hint">Click a row for price history &middot; Data provided by <a href="https://www.discogs.com">Discogs</a></span>
         </div>
         <div class="table-wrap" id="table-wrap">
           <table class="leaderboard">
@@ -264,6 +264,7 @@
     <footer class="app-footer">
       <p id="footer-source">Prices: Discogs marketplace price suggestions for Near Mint (NM or M-) copies.</p>
       <p id="footer-times"></p>
+      <p class="footer-notice">This application uses Discogs&rsquo; API but is not affiliated with, sponsored or endorsed by Discogs. &lsquo;Discogs&rsquo; is a trademark of Zink Media, LLC. Data provided by <a href="https://www.discogs.com">Discogs</a>.</p>
     </footer>
   </div>
 
