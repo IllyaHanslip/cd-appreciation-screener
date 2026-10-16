@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CD Appreciation Leaderboard</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%232a78d6'/%3E%3Ccircle cx='16' cy='16' r='4.5' fill='%23fcfcfb'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/styles.css">
+  <script>
+    // Apply a saved theme before first paint (no flash). Storage may be unavailable.
+    try {
+      var savedTheme = localStorage.getItem("cd-screener-theme");
+      if (savedTheme === "light" || savedTheme === "dark") document.documentElement.dataset.theme = savedTheme;
+    } catch (e) { /* ignore */ }
+  </script>
+</head>
+<body>
+  <div class="page">
+    <header class="app-header">
+      <div class="brand">
+        <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+          <circle cx="16" cy="16" r="14" class="disc"></circle>
+          <circle cx="16" cy="16" r="9" class="groove"></circle>
+          <circle cx="16" cy="16" r="4.5" class="hole"></circle>
+        </svg>
+        <div>
+          <h1>CD Appreciation Leaderboard</h1>
+          <p class="subtitle">Scarce CDs (want/have &gt; <span id="ratio-threshold">2.0</span>) ranked by Scarcity Index &mdash; demand plus price momentum</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <span id="mode-badge" class="badge" hidden></span>
+        <button id="theme-toggle" class="icon-button" type="button" aria-label="Switch theme">
+          <svg viewBox="0 0 24 24" aria-hidden="true" class="icon-moon"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
+          <svg viewBox="0 0 24 24" aria-hidden="true" class="icon-sun"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <main>
+      <nav class="tabs" role="tablist" aria-label="Views">
+        <button type="button" role="tab" class="tab" id="tab-screener" aria-controls="view-screener" aria-selected="true">Screener</button>
+        <button type="button" role="tab" class="tab" id="tab-wantlist" aria-controls="view-wantlist" aria-selected="false" tabindex="-1">My wantlist</button>
+        <button type="button" role="tab" class="tab" id="tab-collection" aria-controls="view-collection" aria-selected="false" tabindex="-1">My collection</button>
+      </nav>
+
+      <div id="alert" class="alert" role="alert" hidden></div>
+
+      <section class="view" id="view-wantlist" role="tabpanel" aria-labelledby="tab-wantlist" hidden>
+        <div class="funnel">
+          <div class="tile"><span class="tile-label">Albums wanted</span><span class="tile-value" id="want-albums">&ndash;</span><span class="tile-sub" id="want-items">&nbsp;</span></div>
+          <div class="tile"><span class="tile-label">Below their usual price</span><span class="tile-value" id="want-deals">&ndash;</span><span class="tile-sub">cheapest copy &ge; 20% under its 30-day median</span></div>
+          <div class="tile"><span class="tile-label">Last checked</span><span class="tile-value tile-value-sm" id="want-checked">&ndash;</span><span class="tile-sub">one price check per album per day</span></div>
+        </div>
+        <section class="filters" aria-label="Wantlist filters">
+          <label class="field field-search">
+            <span class="field-label">Search</span>
+            <span class="search-box">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
+              <input id="want-search" type="search" placeholder="Album or artist" autocomplete="off" spellcheck="false">
+            </span>
+          </label>
+          <label class="field field-check"><input type="checkbox" id="want-deals-only"> Only albums below their usual price</label>
+        </section>
+        <p class="note view-note">Your wantlist grouped by album: all the variants you want of an album are priced together, once a day. <strong>Cheapest copy</strong> is Discogs&rsquo; album-wide lowest price (any pressing or format) &mdash; use <strong>CD listings</strong> for CD-only offers.</p>
+        <div class="table-wrap">
+          <table class="leaderboard" id="want-table">
+            <thead><tr>
+              <th scope="col" class="th-pad">Album</th>
+              <th scope="col" class="num th-pad">Variants</th>
+              <th scope="col" class="num th-pad">Cheapest copy</th>
+              <th scope="col" class="num th-pad">Usual price</th>
+              <th scope="col" class="num th-pad">Change since tracked</th>
+              <th scope="col" class="th-pad">Discogs</th>
+            </tr></thead>
+            <tbody id="want-rows"></tbody>
+          </table>
+          <div class="empty" id="want-empty" hidden><p id="want-empty-text"></p></div>
+        </div>
+      </section>
+
+      <section class="view" id="view-collection" role="tabpanel" aria-labelledby="tab-collection" hidden>
+        <div class="funnel">
+          <div class="tile tile-highlight"><span class="tile-label">Collection value (median)</span><span class="tile-value" id="col-median">&ndash;</span><span class="tile-sub" id="col-range">&nbsp;</span></div>
+          <div class="tile"><span class="tile-label">Items</span><span class="tile-value" id="col-items">&ndash;</span><span class="tile-sub">in your Discogs collection</span></div>
+          <div class="tile"><span class="tile-label">Change since tracking began</span><span class="tile-value" id="col-change">&ndash;</span><span class="tile-sub" id="col-since">&nbsp;</span></div>
+        </div>
+        <figure class="chart-card card" id="col-chart-card">
+          <figcaption>
+            <span class="chart-title">Collection value over time</span>
+            <span class="chart-sub">Discogs&rsquo; median estimate, based on recent sales of your exact pressings</span>
+          </figcaption>
+          <div id="col-chart"></div>
+        </figure>
+        <div class="table-wrap">
+          <table class="leaderboard">
+            <thead><tr>
+              <th scope="col" class="th-pad">Release</th>
+              <th scope="col" class="th-pad">Pressing</th>
+              <th scope="col" class="num th-pad">Year</th>
+              <th scope="col" class="th-pad">Added</th>
+            </tr></thead>
+            <tbody id="col-rows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <div class="view" id="view-screener" role="tabpanel" aria-labelledby="tab-screener">
+      <section class="funnel" aria-label="Data funnel">
+        <div class="tile">
+          <span class="tile-label">Releases scanned</span>
+          <span class="tile-value" id="kpi-releases">&ndash;</span>
+          <span class="tile-sub">all formats</span>
+        </div>
+        <span class="funnel-step" aria-hidden="true">&rsaquo;</span>
+        <div class="tile">
+          <span class="tile-label">CDs</span>
+          <span class="tile-value" id="kpi-cds">&ndash;</span>
+          <span class="tile-sub" id="kpi-cds-sub">format = CD</span>
+        </div>
+        <span class="funnel-step" aria-hidden="true">&rsaquo;</span>
+        <div class="tile">
+          <span class="tile-label">Flagged as scarce</span>
+          <span class="tile-value" id="kpi-flagged">&ndash;</span>
+          <span class="tile-sub" id="kpi-flagged-sub">want/have &gt; 2.0</span>
+        </div>
+        <span class="funnel-step" aria-hidden="true">&rsaquo;</span>
+        <div class="tile">
+          <span class="tile-label">Priced</span>
+          <span class="tile-value" id="kpi-priced">&ndash;</span>
+          <span class="tile-sub" id="kpi-priced-sub">&nbsp;</span>
+        </div>
+        <div class="tile tile-highlight">
+          <span class="tile-label">Median 30-day growth</span>
+          <span class="tile-value" id="kpi-growth">&ndash;</span>
+          <span class="tile-sub" id="kpi-growth-sub">&nbsp;</span>
+        </div>
+      </section>
+
+      <section class="news card" id="news" aria-labelledby="news-title" hidden>
+        <div class="news-header">
+          <div>
+            <p class="news-eyebrow">Weekly report</p>
+            <h2 id="news-title">&nbsp;</h2>
+            <p class="news-sub" id="news-sub"></p>
+          </div>
+          <a class="button-ghost button-link" href="/api/report" download
+             title="Download this report as Markdown (renders nicely on GitHub)">Download report</a>
+        </div>
+        <div class="news-grid" id="news-grid"></div>
+      </section>
+
+      <section class="filters" aria-label="Filters">
+        <label class="field field-search">
+          <span class="field-label">Search</span>
+          <span class="search-box">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
+            <input id="search" type="search" placeholder="Title or artist" autocomplete="off" spellcheck="false">
+          </span>
+        </label>
+        <label class="field">
+          <span class="field-label">Show</span>
+          <select id="flag">
+            <option value="">All CDs</option>
+            <option value="deal">Deals only</option>
+            <option value="reissue">Reissue alerts</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field-label">Genre</span>
+          <select id="genre">
+            <option value="">All genres</option>
+          </select>
+        </label>
+        <div class="field field-range" role="group" aria-labelledby="growth-label">
+          <span class="field-label" id="growth-label">30-day growth <output id="growth-readout" for="growth-min growth-max">Any</output></span>
+          <div class="dual-range" id="growth-range">
+            <input id="growth-min" type="range" min="-50" max="50" step="1" value="-50" aria-label="Minimum 30-day growth, percent">
+            <input id="growth-max" type="range" min="-50" max="50" step="1" value="50" aria-label="Maximum 30-day growth, percent">
+          </div>
+          <span class="range-scale" aria-hidden="true"><span>&le;&minus;50%</span><span>0%</span><span>&ge;+50%</span></span>
+        </div>
+        <button id="reset" type="button" class="button-ghost">Reset filters</button>
+      </section>
+
+      <section class="overview" aria-labelledby="overview-title">
+        <h2 id="overview-title" class="section-heading">Market overview</h2>
+        <div class="overview-grid" id="overview-grid">
+          <figure class="chart-card card card-scatter">
+            <figcaption>
+              <span class="chart-title">Scarcity vs price</span>
+              <span class="chart-sub">One dot per CD. Bottom-right = scarce but still cheap.</span>
+            </figcaption>
+            <div class="legend" aria-hidden="true">
+              <span class="legend-item"><span class="key-dot key-1"></span>Regular pressing</span>
+              <span class="legend-item"><span class="key-dot key-2"></span>Rare pressing (&ge;3&times; album&rsquo;s cheapest)</span>
+            </div>
+            <div class="chart" id="scatter-chart" tabindex="0" role="group"
+                 aria-label="Scatter of want/have ratio against Near Mint estimate. Arrow keys move between CDs, Enter opens details."></div>
+            <p class="note">Log scales. Click a dot for its details &mdash; the leaderboard below is this chart&rsquo;s table view.</p>
+          </figure>
+
+          <figure class="chart-card card card-styles">
+            <figcaption>
+              <span class="chart-title">Median NM estimate by style</span>
+              <span class="chart-sub">Styles with 3+ CDs</span>
+            </figcaption>
+            <div id="style-chart" class="bars"></div>
+            <button type="button" class="link-button" id="style-table-toggle" aria-expanded="false" aria-controls="style-table">Show data table</button>
+            <table class="history-table" id="style-table" hidden></table>
+          </figure>
+
+          <figure class="chart-card card card-index">
+            <figcaption>
+              <span class="chart-title">Market index</span>
+              <span class="chart-sub" id="index-sub">Median daily change, base 100</span>
+            </figcaption>
+            <div class="legend" aria-hidden="true">
+              <span class="legend-item"><span class="key-line key-1"></span>Own price moves (currency removed)</span>
+              <span class="legend-item"><span class="key-line key-2"></span>Raw &pound; prices</span>
+            </div>
+            <div class="chart" id="index-chart" tabindex="0" role="group"
+                 aria-label="Market index over time. Arrow keys read values."></div>
+            <p class="note" id="index-note"></p>
+            <button type="button" class="link-button" id="index-table-toggle" aria-expanded="false" aria-controls="index-table">Show data table</button>
+            <table class="history-table" id="index-table" hidden></table>
+          </figure>
+        </div>
+      </section>
+
+      <section class="board" aria-labelledby="board-title">
+        <div class="board-meta">
+          <h2 id="board-title" class="sr-only">Leaderboard</h2>
+          <span id="result-count" aria-live="polite"></span>
+          <span class="board-hint">Click a row for price history</span>
+        </div>
+        <div class="table-wrap" id="table-wrap">
+          <table class="leaderboard">
+            <thead>
+              <tr>
+                <th scope="col" class="num" data-col="rank"><button type="button" data-sort="rank">Rank</button></th>
+                <th scope="col" data-col="title"><button type="button" data-sort="title">Title</button></th>
+                <th scope="col" data-col="artist"><button type="button" data-sort="artist">Artist</button></th>
+                <th scope="col" class="num col-year" data-col="year"><button type="button" data-sort="year">Year</button></th>
+                <th scope="col" class="num" data-col="ratio"><button type="button" data-sort="ratio">Want/Have</button></th>
+                <th scope="col" class="num" data-col="price"><button type="button" data-sort="price" title="Discogs' suggested price for a Near Mint copy of this exact pressing">Current value (NM est.)</button></th>
+                <th scope="col" class="num col-listed" data-col="listed"><button type="button" data-sort="listed" title="Cheapest copy of this exact pressing currently for sale, any condition">Lowest listed</button></th>
+                <th scope="col" class="num" data-col="growth"><button type="button" data-sort="growth" title="This CD's own price change over 30 days, with market-wide currency moves removed">30-day growth</button></th>
+                <th scope="col" class="col-trend">90-day trend</th>
+                <th scope="col" class="num col-score" data-col="score"><button type="button" data-sort="score">Scarcity index</button></th>
+              </tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+          <div id="empty" class="empty" hidden>
+            <p id="empty-message">No CDs match these filters.</p>
+            <button type="button" class="button-ghost" id="empty-reset">Reset filters</button>
+          </div>
+        </div>
+      </section>
+      </div>
+    </main>
+
+    <footer class="app-footer">
+      <p id="footer-source">Prices: Discogs marketplace price suggestions for Near Mint (NM or M-) copies.</p>
+      <p id="footer-times"></p>
+    </footer>
+  </div>
+
+  <aside id="drawer" class="drawer" aria-labelledby="drawer-title" hidden>
+    <div class="drawer-header">
+      <div>
+        <p class="drawer-eyebrow" id="drawer-eyebrow"></p>
+        <h2 id="drawer-title">Release</h2>
+        <p class="drawer-artist" id="drawer-artist"></p>
+      </div>
+      <button id="drawer-close" class="icon-button" type="button" aria-label="Close details">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="drawer-body" id="drawer-body"></div>
+  </aside>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/
+logs/
+# Reports contain Discogs marketplace prices (Restricted Data): kept local, never published.
+reports/
+.env
