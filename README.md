@@ -314,3 +314,14 @@ Discogs. 'Discogs' is a trademark of Zink Media, LLC.
   `ingest` reads them from the search API.
 - **Pre-2020 SQLite.** The schema uses a generated column, which needs SQLite 3.31 or
   newer (bundled with every current Python).
+
+---
+
+## Acknowledgements
+
+This project was built with the help of [Claude](https://www.anthropic.com/claude),
+Anthropic's AI assistant, using Claude Code. I came up with the idea and directed the
+project: what to build and in what order, the requirements, and the decisions along the
+way, such as keeping Discogs price data private and removing currency effects from
+prices. I also tested it against my own Discogs data. Claude wrote most of the code,
+tests and documentation based on that direction.
