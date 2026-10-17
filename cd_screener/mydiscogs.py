@@ -209,6 +209,8 @@ def wanted_albums(conn: sqlite3.Connection) -> list[dict]:
             "usual_price": usual,
             "below_usual_pct": below_usual,
             "change_pct": round((now / first - 1) * 100, 1) if now and first else None,
+            # When this album's price was first checked: the start of "change since first check".
+            "first_checked_at": history[0]["fetched_at"] if history else None,
             "deal": bool(below_usual is not None and below_usual >= config.DEAL_BELOW_USUAL_PCT),
             "days_tracked": len(history),
             **_album_links(key),

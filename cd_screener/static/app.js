@@ -9,10 +9,39 @@
 (() => {
   const GROWTH_MIN = -50; // slider ends mean "no bound"
   const GROWTH_MAX = 50;
-  const DEFAULT_ORDER = {
-    rank: "asc", title: "asc", artist: "asc", year: "desc",
-    ratio: "desc", price: "desc", listed: "desc", growth: "desc", score: "desc",
+  // Column sorting: click 1 sorts in the column's most useful direction, click 2 reverses
+  // it, click 3 returns to the table's normal ordering. FIRST_* is each column's click-1
+  // direction, written as [order, hint for click 1, hint for click 2].
+  const SCREENER_FIRST = {
+    rank: ["desc", "lowest-ranked first", "normal order"],
+    title: ["asc", "A to Z", "Z to A"],
+    artist: ["asc", "A to Z", "Z to A"],
+    year: ["asc", "oldest first", "newest first"],
+    ratio: ["desc", "scarcest first", "least scarce first"],
+    price: ["desc", "highest first", "lowest first"],
+    listed: ["asc", "cheapest first", "most expensive first"],
+    growth: ["desc", "biggest rise first", "biggest fall first"],
+    velocity: ["desc", "fastest rising first", "fastest falling first"],
+    score: ["asc", "lowest first", "highest first"],
   };
+
+  /** Next state of the 3-click cycle; null means "back to the normal ordering". */
+  function nextSort(current, key, first) {
+    if (!current || current.key !== key) return { key, order: first };
+    if (current.order === first) return { key, order: first === "asc" ? "desc" : "asc" };
+    return null;
+  }
+
+  /** Add "Click to sort: …" to each sortable heading's tooltip. */
+  function addSortHints(table, attribute, columns) {
+    table.querySelectorAll(`button[${attribute}]`).forEach((button) => {
+      const [, one, two] = columns[button.getAttribute(attribute)];
+      const hint = two === "normal order"
+        ? `Click to sort: ${one}, then back to normal order`
+        : `Click to sort: ${one}, then ${two}, then back to normal order`;
+      button.title = button.title ? `${button.title}\n${hint}` : hint;
+    });
+  }
 
   const state = {
     q: "",
@@ -381,7 +410,7 @@
   }
 
   function updateSortIndicators() {
-    document.querySelectorAll(".leaderboard thead th[data-col]").forEach((th) => {
+    $("board-table").querySelectorAll("thead th[data-col]").forEach((th) => {
       if (th.dataset.col === state.sort) {
         th.setAttribute("aria-sort", state.order === "asc" ? "ascending" : "descending");
       } else {
@@ -896,28 +925,85 @@
     }
   }
 
+  // Wantlist sorting happens in the browser (all albums are already loaded). The normal
+  // ordering is the server's: deals first, then the rest. Empty values always sort last.
+  const WANT_FIRST = {
+    title: ["asc", "A to Z", "Z to A"],
+    artist: ["asc", "A to Z", "Z to A"],
+    variants: ["desc", "most first", "fewest first"],
+    cheapest: ["asc", "cheapest first", "most expensive first"],
+    usual: ["asc", "cheapest first", "most expensive first"],
+    change: ["asc", "biggest drop first", "biggest rise first"],
+  };
+  const WANT_VALUE = {
+    title: (a) => a.title.toLowerCase(),
+    artist: (a) => a.artist.toLowerCase(),
+    variants: (a) => a.variants,
+    cheapest: (a) => (a.num_for_sale === 0 ? null : a.lowest_price),
+    usual: (a) => a.usual_price,
+    change: (a) => (a.days_tracked > 1 ? a.change_pct : null),
+  };
+  let wantSort = null; // { key, order } or null for the normal ordering
+
+  function sortWantAlbums(rows) {
+    if (!wantSort) return rows;
+    const value = WANT_VALUE[wantSort.key];
+    const direction = wantSort.order === "asc" ? 1 : -1;
+    return rows
+      .map((album, index) => ({ album, index, v: value(album) }))
+      .sort((x, y) => {
+        if (x.v == null || y.v == null) return (x.v == null) - (y.v == null) || x.index - y.index;
+        const cmp = typeof x.v === "string" ? x.v.localeCompare(y.v) : x.v - y.v;
+        return direction * cmp || x.index - y.index; // ties keep the normal ordering
+      })
+      .map((row) => row.album);
+  }
+
+  function updateWantSortIndicators() {
+    $("want-table").querySelectorAll("thead th[data-wcol]").forEach((th) => {
+      if (wantSort && th.dataset.wcol === wantSort.key) {
+        th.setAttribute("aria-sort", wantSort.order === "asc" ? "ascending" : "descending");
+      } else {
+        th.removeAttribute("aria-sort");
+      }
+    });
+  }
+
+  $("want-table").querySelector("thead").addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-wsort]");
+    if (!button) return;
+    const key = button.dataset.wsort;
+    wantSort = nextSort(wantSort, key, WANT_FIRST[key][0]);
+    updateWantSortIndicators();
+    renderWantlist();
+  });
+  addSortHints($("want-table"), "data-wsort", WANT_FIRST);
+
   function renderWantlist() {
     const q = $("want-search").value.trim().toLowerCase();
     const dealsOnly = $("want-deals-only").checked;
-    const rows = wantAlbums.filter((a) => (!dealsOnly || a.deal)
-      && (!q || `${a.artist} ${a.title}`.toLowerCase().includes(q)));
+    const rows = sortWantAlbums(wantAlbums.filter((a) => (!dealsOnly || a.deal)
+      && (!q || `${a.artist} ${a.title}`.toLowerCase().includes(q))));
     const link = (href, text) => el("a", { href, target: "_blank", rel: "noopener", text });
+    const sinceDay = (iso) => new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" });
     $("want-rows").replaceChildren(...rows.map((a) => {
       const tr = el("tr", { "data-album": a.album_key, tabindex: "0" });
       const days = a.days_tracked;
       tr.append(
         el("td", { class: "title-cell" },
           el("div", { class: "title", text: a.title }),
-          el("div", { class: "sub", text: a.artist }),
           a.deal ? el("div", { class: "flags" }, el("span", { class: "flag flag-deal",
             text: `Deal · ${Math.round(a.below_usual_pct)}% below usual` })) : null),
+        el("td", { class: "artist", text: a.artist }),
         el("td", { class: "num", text: a.variants, title: `${a.cd_variants} of them on CD` }),
         el("td", { class: "num" },
           el("div", { text: a.num_for_sale === 0 ? "none for sale" : fmtMoney(a.lowest_price, a.currency) }),
           a.num_for_sale ? el("div", { class: "sub", text: `${intFmt.format(a.num_for_sale)} for sale` }) : null),
         el("td", { class: "num", text: a.usual_price != null ? fmtMoney(a.usual_price, a.currency) : "—",
           title: a.usual_price == null ? `Needs ${3 - Math.min(days - 1, 3)} more day(s) of prices` : "Median of the previous 30 days" }),
-        el("td", { class: "num" }, days > 1 ? deltaNode(a.change_pct) : el("span", { class: "muted", text: "—" })),
+        el("td", { class: "num" },
+          days > 1 ? deltaNode(a.change_pct) : el("span", { class: "muted", text: "—", title: "Needs a second day of checks" }),
+          a.first_checked_at ? el("div", { class: "sub", text: `since ${sinceDay(a.first_checked_at)}` }) : null),
         el("td", {}, el("div", { class: "cell-links" },
           link(a.cd_listings_url, "CD listings ↗"), link(a.album_url, "Album ↗"))));
       return tr;
@@ -965,8 +1051,8 @@
               a.num_for_sale ? `${intFmt.format(a.num_for_sale)} for sale, any pressing or format` : "nothing for sale"),
             row("Usual price", a.usual_price != null ? fmtMoney(a.usual_price, cur) : "—",
               a.usual_price != null ? "median of the previous 30 days" : "after 3+ days of checks"),
-            row("Change since tracked", a.change_pct != null ? fmtSignedPct(a.change_pct) : "—",
-              `${a.days_tracked} day${a.days_tracked === 1 ? "" : "s"} of checks`))),
+            row("Change since first check", a.change_pct != null ? fmtSignedPct(a.change_pct) : "—",
+              `${a.first_checked_at ? `since ${fmtDate(a.first_checked_at)} · ` : ""}${a.days_tracked} day${a.days_tracked === 1 ? "" : "s"} of checks`))),
           attribution(a.album_url),
           a.deal ? el("p", { class: "callout", text: `Deal: the cheapest copy is ${Math.round(a.below_usual_pct)}% below its usual price. Check that it's a CD you want.` }) : null,
           el("p", { class: "links" },
@@ -1496,15 +1582,21 @@
 
   // ----------------------------------------------------------- table events
 
-  document.querySelector(".leaderboard thead").addEventListener("click", (event) => {
+  // The leaderboard's normal ordering is by rank (Scarcity Index), so "rank ascending" is
+  // treated as "not sorted by a column".
+  $("board-table").querySelector("thead").addEventListener("click", (event) => {
     const button = event.target.closest("button[data-sort]");
     if (!button) return;
     const key = button.dataset.sort;
-    if (state.sort === key) state.order = state.order === "asc" ? "desc" : "asc";
-    else { state.sort = key; state.order = DEFAULT_ORDER[key] || "asc"; }
+    const current = state.sort === "rank" && state.order === "asc"
+      ? null : { key: state.sort, order: state.order };
+    const next = nextSort(current, key, SCREENER_FIRST[key][0]);
+    state.sort = next ? next.key : "rank";
+    state.order = next ? next.order : "asc";
     updateSortIndicators();
     loadLeaderboard();
   });
+  addSortHints($("board-table"), "data-sort", SCREENER_FIRST);
 
   const tbody = $("rows");
   tbody.addEventListener("click", (event) => {

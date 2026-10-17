@@ -218,7 +218,7 @@ The leaderboard **Rank** is by Scarcity Index. Weights and windows live in `cd_s
 
 | Endpoint | Returns |
 |---|---|
-| `GET /api/leaderboard` | Ranked releases. Query: `q` (title/artist search), `genre`, `min_growth`, `max_growth`, `sort` (`rank`, `title`, `artist`, `year`, `ratio`, `price`, `growth`, `appreciation`, `score`), `order` (`asc`/`desc`), `limit` |
+| `GET /api/leaderboard` | Ranked releases. Query: `q` (title/artist search), `genre`, `flag` (`deal`/`reissue`), `min_growth`, `max_growth`, `sort` (`rank`, `title`, `artist`, `year`, `ratio`, `price`, `listed`, `growth`, `velocity`, `appreciation`, `score`, `discount`, `premium`), `order` (`asc`/`desc`), `limit`. In the dashboard, clicking a column heading cycles through the column's most useful order, the reverse, and back to the normal ranking. |
 | `GET /api/releases/<id>` | One release: metadata, metrics, full price history, last 5 fetch attempts (404 if unknown) |
 | `GET /api/summary` | Funnel counts, data mode, missing-price counts, last fetch time |
 | `GET /api/genres` | Genres on the leaderboard with counts |

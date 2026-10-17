@@ -33,6 +33,7 @@ SORT_COLUMNS = {
     "ratio": ("r.want_have_ratio", ""),
     "price": ("m.current_price", ""),
     "growth": ("m.growth_30d_pct", ""),
+    "velocity": ("m.velocity_30d_pct", ""),
     "appreciation": ("m.pct_appreciation", ""),
     "score": ("m.scarcity_index", ""),
     "listed": ("l.listed_price", ""),

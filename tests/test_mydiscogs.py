@@ -87,3 +87,4 @@ def test_album_deal_needs_a_usual_price(conn):
     album = mydiscogs.wanted_albums(conn)[0]
     assert (album["usual_price"], album["below_usual_pct"], album["deal"]) == (10.0, 30.0, True)
     assert album["change_pct"] == pytest.approx(-30.0)
+    assert album["first_checked_at"] == "2026-10-10T12:00:00Z"  # start of "change since first check"

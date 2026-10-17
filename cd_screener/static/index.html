@@ -66,11 +66,12 @@
         <div class="table-wrap">
           <table class="leaderboard" id="want-table">
             <thead><tr>
-              <th scope="col" class="th-pad">Album</th>
-              <th scope="col" class="num th-pad">Variants</th>
-              <th scope="col" class="num th-pad">Cheapest copy</th>
-              <th scope="col" class="num th-pad">Usual price</th>
-              <th scope="col" class="num th-pad">Change since tracked</th>
+              <th scope="col" data-wcol="title"><button type="button" data-wsort="title">Album</button></th>
+              <th scope="col" data-wcol="artist"><button type="button" data-wsort="artist">Artist</button></th>
+              <th scope="col" class="num" data-wcol="variants"><button type="button" data-wsort="variants" title="How many variants of this album are on your Discogs wantlist">Variants</button></th>
+              <th scope="col" class="num" data-wcol="cheapest"><button type="button" data-wsort="cheapest" title="Cheapest copy of this album for sale now, any pressing or format">Cheapest copy</button></th>
+              <th scope="col" class="num" data-wcol="usual"><button type="button" data-wsort="usual" title="Median cheapest copy over the previous 30 days of checks (needs 3+ days)">Usual price</button></th>
+              <th scope="col" class="num" data-wcol="change"><button type="button" data-wsort="change" title="Change in the cheapest copy since this album was first checked (date shown under each value)">Change since first check</button></th>
               <th scope="col" class="th-pad">Discogs</th>
             </tr></thead>
             <tbody id="want-rows"></tbody>
@@ -93,7 +94,7 @@
           <div id="col-chart"></div>
         </figure>
         <div class="table-wrap">
-          <table class="leaderboard">
+          <table class="leaderboard" id="collection-table">
             <thead><tr>
               <th scope="col" class="th-pad">Release</th>
               <th scope="col" class="th-pad">Pressing</th>
@@ -235,7 +236,7 @@
           <span class="board-hint">Click a row for price history &middot; Data provided by <a href="https://www.discogs.com">Discogs</a></span>
         </div>
         <div class="table-wrap" id="table-wrap">
-          <table class="leaderboard">
+          <table class="leaderboard" id="board-table">
             <thead>
               <tr>
                 <th scope="col" class="num" data-col="rank"><button type="button" data-sort="rank">Rank</button></th>
@@ -246,7 +247,7 @@
                 <th scope="col" class="num" data-col="price"><button type="button" data-sort="price" title="Discogs' suggested price for a Near Mint copy of this exact pressing">Current value (NM est.)</button></th>
                 <th scope="col" class="num col-listed" data-col="listed"><button type="button" data-sort="listed" title="Cheapest copy of this exact pressing currently for sale, any condition">Lowest listed</button></th>
                 <th scope="col" class="num" data-col="growth"><button type="button" data-sort="growth" title="This CD's own price change over 30 days, with market-wide currency moves removed">30-day growth</button></th>
-                <th scope="col" class="col-trend">90-day trend</th>
+                <th scope="col" class="col-trend" data-col="velocity"><button type="button" data-sort="velocity" title="Trend speed: fitted price trend over the last 90 days, per 30 days, currency moves removed">90-day trend</button></th>
                 <th scope="col" class="num col-score" data-col="score"><button type="button" data-sort="score">Scarcity index</button></th>
               </tr>
             </thead>

@@ -91,6 +91,8 @@ def test_filters(client):
 def test_sorting_and_validation(client):
     assert ids(client.get("/api/leaderboard?sort=price&order=desc")) == [2, 1]
     assert ids(client.get("/api/leaderboard?sort=growth&order=desc")) == [1, 2]
+    assert ids(client.get("/api/leaderboard?sort=velocity&order=desc")) == [1, 2]  # 90-day trend
+    assert ids(client.get("/api/leaderboard?sort=velocity&order=asc")) == [2, 1]
     assert client.get("/api/leaderboard?sort=price;DROP TABLE releases").status_code == 400
     assert client.get("/api/leaderboard?order=sideways").status_code == 400
     bad = client.get("/api/leaderboard?min_growth=lots")

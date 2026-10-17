@@ -528,7 +528,6 @@ input[type="search"]:focus-visible, select:focus-visible { outline: 2px solid va
   font-size: 12px;
   font-weight: 600;
 }
-.leaderboard thead th.col-trend { padding: 10px 12px; }
 .leaderboard thead th button {
   all: unset;
   box-sizing: border-box;
@@ -546,6 +545,9 @@ input[type="search"]:focus-visible, select:focus-visible { outline: 2px solid va
 .leaderboard thead th[aria-sort] button { color: var(--text-primary); }
 .leaderboard thead th[aria-sort="ascending"] button::after { content: "\2191"; }
 .leaderboard thead th[aria-sort="descending"] button::after { content: "\2193"; }
+/* Unsorted sortable headings hint that they can be clicked. */
+.leaderboard thead th:not([aria-sort]) button:hover::after,
+.leaderboard thead th:not([aria-sort]) button:focus-visible::after { content: "\2195"; opacity: 0.45; }
 
 .leaderboard tbody tr { cursor: pointer; }
 .leaderboard tbody tr:last-child td { border-bottom: 0; }
