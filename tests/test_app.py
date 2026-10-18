@@ -210,6 +210,33 @@ def test_cli_reports_missing_steps_without_a_traceback(tmp_path, capsys):
     assert "Funnel" in capsys.readouterr().out
 
 
+def test_daily_job_waits_for_its_time_and_runs_once_a_day(conn, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from cd_screener import __main__ as cli
+
+    calls, outcome = [], {"aborted": None}
+    monkeypatch.setattr(cli.notify, "toast", lambda *args: calls.append("toast"))
+    monkeypatch.setattr(cli.mydiscogs, "sync_me", lambda conn: calls.append("sync") or {})
+    monkeypatch.setattr(cli.price_worker, "run_worker", lambda conn, on_start=None: calls.append("prices")
+                        or SimpleNamespace(aborted=outcome["aborted"], queued=1, ok=1, report_period=None))
+    done = tmp_path / cli.DAILY_DONE_FILE
+
+    def run(day, hour):  # what Task Scheduler starts: at 12:00, hourly, on wake-up and log-on
+        return cli._daily(conn, not_before=cli._time_of_day("12:00"), done_file=done,
+                          now=datetime(2026, 10, day, hour, 5))
+
+    assert run(18, 9) == 0 and calls == []  # woke up in the morning: wait for 12:00
+    outcome["aborted"] = "network down"
+    assert run(18, 12) == 1 and not done.exists()  # failed: try again at the next start
+    outcome["aborted"] = None
+    calls.clear()
+    assert run(18, 13) == 0 and calls == ["prices", "sync", "toast"]
+    assert done.read_text() == "2026-10-18"
+    assert run(18, 14) == 0 and len(calls) == 3  # already done today
+    assert run(19, 12) == 0 and len(calls) == 6  # a new day
+
+
 def add_collection_item(path, release_id=42):
     conn = db.connect(path)
     conn.execute(

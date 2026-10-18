@@ -14,6 +14,8 @@ import threading
 import time
 import urllib.request
 import webbrowser
+from datetime import datetime
+from datetime import time as clock_time
 from pathlib import Path
 
 from . import analytics, config, db, ingest, mydiscogs, notify, price_worker, report, seed
@@ -34,6 +36,13 @@ def _positive_int(text: str) -> int:
     if value <= 0:
         raise argparse.ArgumentTypeError("must be a positive integer")
     return value
+
+
+def _time_of_day(text: str) -> clock_time:
+    try:
+        return datetime.strptime(text, "%H:%M").time()
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected a time like 12:00, got {text!r}") from None
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -88,8 +97,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--force", action="store_true",
                    help="resync even if already done today (only new items are priced again)")
 
-    sub.add_parser("daily", help="scheduled job: fetch-prices (+ weekly report when due), "
-                                 "logging to logs/daily.log; safe to run several times a day")
+    p = sub.add_parser("daily", help="scheduled job: fetch-prices and sync-me (+ weekly report "
+                                     "when due), logging to logs/daily.log; once it has "
+                                     "finished for the day, later runs that day do nothing")
+    p.add_argument("--not-before", type=_time_of_day, metavar="HH:MM",
+                   help="do nothing before this time of day (the scheduled task also starts "
+                        "the job when the PC wakes up or you log on)")
 
     p = sub.add_parser("open", help="start the dashboard and open it in your browser "
                                     "(what the desktop shortcut runs)")
@@ -111,8 +124,25 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _daily(conn) -> int:
-    """The scheduled job, with Windows notifications when it starts and finishes real work."""
+DAILY_DONE_FILE = "last_daily_run.txt"  # next to the database: the day the job last finished
+
+
+def _daily(conn, *, not_before: clock_time | None = None, done_file: Path | None = None,
+           now: datetime | None = None) -> int:
+    """The scheduled job, with Windows notifications when it starts and finishes real work.
+
+    Task Scheduler starts it at the set time, hourly after that, and when the PC wakes up
+    or you log on. Before `not_before`, or once today's run has finished, it does nothing.
+    """
+    now = now or datetime.now()
+    if not_before and now.time() < not_before:
+        log.info("Started at %s: the daily run waits until %s", now.strftime("%H:%M"),
+                 not_before.strftime("%H:%M"))
+        return 0
+    today = now.date().isoformat()
+    if done_file and done_file.exists() and done_file.read_text(encoding="utf-8").strip() == today:
+        log.debug("Today's daily run has already finished")
+        return 0
     log.info("=== Daily run started ===")
 
     def started(n_releases: int, eta_minutes: float) -> None:
@@ -126,12 +156,16 @@ def _daily(conn) -> int:
         notify.toast("CD Screener: run failed", str(exc)[:200])
         raise
     me = {}
+    sync_failed = False
     if not summary.aborted:
         try:  # your wantlist + collection; a failure here never hides the price results
             me = mydiscogs.sync_me(conn)
         except Exception as exc:  # noqa: BLE001 - reported, then the run carries on
             log.error("Wantlist/collection sync failed: %s", exc)
+            sync_failed = True
     log.info("=== Daily run finished ===")
+    if done_file and not summary.aborted and not sync_failed:
+        done_file.write_text(today, encoding="utf-8")  # later runs today do nothing
 
     if summary.queued == 0 and not summary.report_period and not me:
         return 0  # nothing new today: stay silent
@@ -257,7 +291,8 @@ def main(argv: list[str] | None = None) -> int:
                 seed=args.seed,
                 analyze=not args.no_analyze)
         elif args.command == "daily":
-            return _daily(conn)
+            return _daily(conn, not_before=args.not_before,
+                          done_file=Path(args.db or config.DB_PATH).with_name(DAILY_DONE_FILE))
         elif args.command == "sync-me":
             result = mydiscogs.sync_me(conn, force=args.force)
             if result:

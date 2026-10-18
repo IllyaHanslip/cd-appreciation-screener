@@ -172,11 +172,14 @@ python -m cd_screener --db other.db serve --port 8080
    powershell -ExecutionPolicy Bypass -File scripts\install_daily_task.ps1
    ```
 
-   It runs `python -m cd_screener daily` hidden at 12:00 every day, or as soon as possible
-   afterwards if the PC was off. It shows a Windows notification when it starts and when it
-   finishes (CDs priced, deals, new weekly report) and logs to `logs\daily.log`. Extra runs
-   on the same day are harmless. Use `-Time "08:30"` for another time, and
-   `scripts\uninstall_daily_task.ps1` to remove it.
+   It runs `python -m cd_screener daily --not-before 12:00` hidden at 12:00 every day. If
+   the PC was off or asleep then, it catches up as soon as it can: the task also starts when
+   the PC wakes up, when you log on, and every hour until midnight. Those extra starts do
+   nothing before 12:00 or once the day's run has finished (recorded in
+   `data\last_daily_run.txt`), so it runs once a day. It shows a Windows notification when it
+   starts and when it finishes (CDs priced, deals, new weekly report) and logs to
+   `logs\daily.log`. Use `-Time "08:30"` for another time (run the script again to change
+   it), and `scripts\uninstall_daily_task.ps1` to remove it.
 
    On macOS/Linux, use cron: `0 7 * * * cd /path/to/cd-appreciation-screener && .venv/bin/python -m cd_screener fetch-prices`.
 
