@@ -25,6 +25,8 @@ _ADDED_COLUMNS = {
     "releases": {"label": "TEXT", "catno": "TEXT", "master_id": "INTEGER"},
     "master_snapshots": {"cd_versions": "INTEGER", "latest_cd_year": "INTEGER",
                          "latest_cd_release_id": "INTEGER"},
+    "user_items": {"format_details": "TEXT", "media_condition": "TEXT", "sleeve_condition": "TEXT",
+                   "notes": "TEXT", "country": "TEXT", "barcode": "TEXT"},
 }
 _NEWEST_METRIC_COLUMN = "reissue_reason"
 

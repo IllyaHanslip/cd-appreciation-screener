@@ -84,9 +84,17 @@ CREATE TABLE IF NOT EXISTS user_items (
     title         TEXT    NOT NULL,
     year          INTEGER,
     format        TEXT,
+    format_details   TEXT,                             -- e.g. 'CD, Album, Remastered, Digipak'
     label         TEXT,
     catno         TEXT,
     date_added    TEXT,
+    -- Collection only: what you set in your Discogs collection's fields...
+    media_condition  TEXT,
+    sleeve_condition TEXT,
+    notes            TEXT,
+    -- ...and the pressing's country and barcode (looked up once; '' when Discogs has none).
+    country          TEXT,
+    barcode          TEXT,
     active        INTEGER NOT NULL DEFAULT 1,          -- 0 once removed on Discogs
     first_seen    TEXT    NOT NULL,
     last_seen     TEXT    NOT NULL,
@@ -134,10 +142,10 @@ CREATE TABLE IF NOT EXISTS user_item_prices (
 CREATE INDEX IF NOT EXISTS idx_user_item_prices ON user_item_prices (release_id, id);
 
 -- What you paid for items in your collection (typed in on the dashboard, never from Discogs).
+-- The CD's price only: Discogs prices exclude postage too, so comparisons are like for like.
 CREATE TABLE IF NOT EXISTS user_purchases (
     release_id    INTEGER PRIMARY KEY,
-    price_paid    REAL    NOT NULL CHECK (price_paid >= 0),  -- the CD itself
-    shipping_paid REAL    CHECK (shipping_paid >= 0),        -- postage, when known
+    price_paid    REAL    NOT NULL CHECK (price_paid >= 0),
     currency      TEXT    NOT NULL,
     purchased_on  TEXT,                                -- YYYY-MM-DD, optional
     updated_at    TEXT    NOT NULL

@@ -373,8 +373,9 @@ input[type="search"]:focus-visible, select:focus-visible { outline: 2px solid va
 #col-chart-card { margin-bottom: 16px; }
 /* The collection table drops its least important columns when the drawer narrows it. */
 #view-collection .table-wrap { container: collection / inline-size; }
-@container collection (max-width: 980px) { .col-added { display: none; } }
-@container collection (max-width: 760px) { .col-pressing { display: none; } }
+.leaderboard td.col-pressing { min-width: 190px; white-space: normal; }
+@container collection (max-width: 1100px) { .col-added { display: none; } }
+@container collection (max-width: 900px) { .col-pressing { display: none; } }
 
 /* ---------- weekly report (news card) ---------- */
 
@@ -745,6 +746,7 @@ input[type="search"]:focus-visible, select:focus-visible { outline: 2px solid va
 .kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; font-size: 13px; }
 .kv dt { color: var(--text-secondary); }
 .kv dd { margin: 0; }
+.kv + .note { margin-top: 8px; }
 .links { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 10px 0 0; font-size: 13px; }
 .links a { color: var(--accent-ink); font-weight: 600; text-decoration: none; }
 .links a:hover { text-decoration: underline; }
@@ -755,7 +757,7 @@ input[type="search"]:focus-visible, select:focus-visible { outline: 2px solid va
 .market-table .num { text-align: right; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .market-table .note-cell { color: var(--text-secondary); font-size: 12px; }
 /* "What you paid" form in the collection drawer */
-.paid-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+.paid-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
 .paid-form select { min-width: 0; width: 100%; }
 input[type="number"], input[type="date"] {
   width: 100%;

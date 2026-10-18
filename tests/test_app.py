@@ -235,14 +235,13 @@ def test_collection_prices_and_purchase_editing(client, db_path):
     assert client.get("/api/me/collection/999").status_code == 404
 
     url = "/api/me/collection/42/purchase"
-    saved = client.put(url, json={"price_paid": "8.80", "shipping_paid": 2.2, "currency": "gbp",
-                                  "purchased_on": "2026-06-01"})
+    saved = client.put(url, json={"price_paid": "8.80", "currency": "gbp", "purchased_on": "2026-06-01"})
     assert saved.status_code == 200
     data = saved.get_json()
-    assert (data["price_paid"], data["shipping_paid"], data["paid_currency"]) == (8.8, 2.2, "GBP")
-    assert (data["purchased_on"], data["vs_paid_pct"]) == ("2026-06-01", 25.0)  # 11 now vs 8.80
+    assert (data["price_paid"], data["paid_currency"], data["purchased_on"]) == (8.8, "GBP", "2026-06-01")
+    assert data["vs_paid_pct"] == 25.0  # 11 now vs 8.80
     paid = client.get("/api/me/collection").get_json()["paid"]
-    assert (paid["items"], paid["total"], paid["change_pct"]) == (1, 11.0, 25.0)
+    assert (paid["items"], paid["total"], paid["change_pct"]) == (1, 8.8, 25.0)
 
     for bad in ({"currency": "GBP"}, {"price_paid": -1, "currency": "GBP"},
                 {"price_paid": "lots", "currency": "GBP"}, {"price_paid": True, "currency": "GBP"},

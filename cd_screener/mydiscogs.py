@@ -10,6 +10,9 @@
   item is priced once a day: the Near Mint suggestion for that exact pressing and the
   cheapest copy listed for sale (two requests per item).
 * What you paid for an item is typed in on the dashboard and compared with today's prices.
+* For each collection item it also records which edition you have (format details, and the
+  country and barcode, looked up once) and the media/sleeve condition and notes you set in
+  your Discogs collection's fields.
 * Items added on the Discogs website appear at the next sync (and are priced that day);
   removed ones are hidden.
 * "Today" is the calendar day on this PC, so a late-night run never counts as tomorrow.
@@ -38,6 +41,7 @@ from .seed import clean_artist_name
 log = logging.getLogger(__name__)
 
 _SYMBOLS = {"£": "GBP", "$": "USD", "€": "EUR", "¥": "JPY"}
+_DEFAULT_FIELDS = {1: "media condition", 2: "sleeve condition", 3: "notes"}  # Discogs' defaults
 
 
 def _today_start() -> str:
@@ -91,7 +95,18 @@ def _pages(client: DiscogsClient, path: str, key: str) -> Iterator[Mapping[str, 
         page += 1
 
 
-def _item_row(entry: Mapping[str, Any], list_name: str, now: str) -> dict | None:
+def _format_details(formats: Any) -> str | None:
+    """'CD, Album, Remastered, Digipak': every format of the release, with its descriptions."""
+    parts = []
+    for f in formats or []:
+        qty = str(f.get("qty") or "1")
+        name = f"{qty}×{f.get('name')}" if qty != "1" else f.get("name")
+        parts.append(", ".join(str(p) for p in [name, *(f.get("descriptions") or []), f.get("text")] if p))
+    return " + ".join(p for p in parts if p) or None
+
+
+def _item_row(entry: Mapping[str, Any], list_name: str, now: str,
+              fields: Mapping[int, str] | None = None) -> dict | None:
     info = entry.get("basic_information") or {}
     release_id = info.get("id") or entry.get("id")
     if not isinstance(release_id, int):
@@ -99,6 +114,13 @@ def _item_row(entry: Mapping[str, Any], list_name: str, now: str) -> dict | None
     master_id = info.get("master_id") or None
     artists = " & ".join(clean_artist_name(a.get("name") or "") for a in info.get("artists") or [])
     label = (info.get("labels") or [{}])[0]
+    # Your own collection fields (field id -> value), e.g. Media Condition: "Near Mint (NM or M-)".
+    yours = {}
+    if list_name == "collection":
+        for note in entry.get("notes") or []:
+            value = str(note.get("value") or "").strip() if isinstance(note, Mapping) else ""
+            if value:
+                yours[(fields or _DEFAULT_FIELDS).get(note.get("field_id"))] = value
     return {
         "list": list_name,
         "release_id": release_id,
@@ -108,12 +130,29 @@ def _item_row(entry: Mapping[str, Any], list_name: str, now: str) -> dict | None
         "title": info.get("title") or "Untitled",
         "year": info.get("year") or None,
         "format": ((info.get("formats") or [{}])[0]).get("name"),
+        "format_details": _format_details(info.get("formats")),
         "label": label.get("name"),
         "catno": label.get("catno"),
         "date_added": entry.get("date_added"),
+        "media_condition": yours.get("media condition"),
+        "sleeve_condition": yours.get("sleeve condition"),
+        "notes": yours.get("notes"),
         "first_seen": now,
         "last_seen": now,
     }
+
+
+def _collection_field_names(client: DiscogsClient, username: str) -> dict[int, str]:
+    """Your collection's fields by id, lower-cased: Media Condition, Sleeve Condition, Notes..."""
+    try:
+        payload = client.get_json(f"/users/{username}/collection/fields")
+    except DiscogsAuthError:
+        raise
+    except DiscogsError as exc:
+        log.warning("Collection fields lookup failed (%s); assuming Discogs' default fields", exc)
+        return dict(_DEFAULT_FIELDS)
+    return {f["id"]: str(f.get("name") or "").strip().lower()
+            for f in payload.get("fields") or [] if isinstance(f, Mapping) and "id" in f}
 
 
 def parse_money(text: Any) -> tuple[float | None, str | None]:
@@ -136,19 +175,26 @@ def sync_lists(conn: sqlite3.Connection, client: DiscogsClient, username: str) -
         "want": (f"/users/{username}/wants", "wants"),
         "collection": (f"/users/{username}/collection/folders/0/releases", "releases"),
     }
+    fields = _collection_field_names(client, username)
     for list_name, (path, key) in sources.items():
-        rows = [r for r in (_item_row(e, list_name, now) for e in _pages(client, path, key)) if r]
+        rows = [r for r in (_item_row(e, list_name, now, fields) for e in _pages(client, path, key))
+                if r]
         with conn:
             conn.executemany(
                 "INSERT INTO user_items (list, release_id, album_key, master_id, artist, title, "
-                "year, format, label, catno, date_added, active, first_seen, last_seen) "
+                "year, format, format_details, label, catno, date_added, media_condition, "
+                "sleeve_condition, notes, active, first_seen, last_seen) "
                 "VALUES (:list, :release_id, :album_key, :master_id, :artist, :title, :year, "
-                ":format, :label, :catno, :date_added, 1, :first_seen, :last_seen) "
+                ":format, :format_details, :label, :catno, :date_added, :media_condition, "
+                ":sleeve_condition, :notes, 1, :first_seen, :last_seen) "
                 "ON CONFLICT (list, release_id) DO UPDATE SET album_key = excluded.album_key, "
                 "master_id = excluded.master_id, artist = excluded.artist, title = excluded.title, "
-                "year = excluded.year, format = excluded.format, label = excluded.label, "
-                "catno = excluded.catno, date_added = excluded.date_added, active = 1, "
-                "last_seen = excluded.last_seen", rows)
+                "year = excluded.year, format = excluded.format, "
+                "format_details = excluded.format_details, label = excluded.label, "
+                "catno = excluded.catno, date_added = excluded.date_added, "
+                "media_condition = excluded.media_condition, "
+                "sleeve_condition = excluded.sleeve_condition, notes = excluded.notes, "
+                "active = 1, last_seen = excluded.last_seen", rows)
             # Anything not in this sync was removed on Discogs.
             seen = {r["release_id"] for r in rows}
             gone = [(list_name, rid) for (rid,) in conn.execute(
@@ -158,6 +204,31 @@ def sync_lists(conn: sqlite3.Connection, client: DiscogsClient, username: str) -
                              gone)
         counts[list_name] = len(rows)
     return counts
+
+
+def fill_collection_details(conn: sqlite3.Connection, client: DiscogsClient) -> int:
+    """Country and barcode of each collection item: one /releases lookup per item, done once."""
+    release_ids = [r[0] for r in conn.execute(
+        "SELECT release_id FROM user_items WHERE list = 'collection' AND active = 1 "
+        "AND country IS NULL ORDER BY release_id")]
+    filled = 0
+    for rid in release_ids:
+        try:
+            release = client.get_json(f"/releases/{rid}")
+        except DiscogsAuthError:
+            raise
+        except DiscogsError as exc:
+            log.warning("Collection item %s: release lookup failed: %s", rid, exc)
+            continue
+        barcode = next((str(i["value"]) for i in release.get("identifiers") or []
+                        if isinstance(i, Mapping) and i.get("type") == "Barcode" and i.get("value")),
+                       "")
+        with conn:  # '' = looked up, Discogs has none (so it isn't looked up again)
+            conn.execute("UPDATE user_items SET country = ?, barcode = ? "
+                         "WHERE list = 'collection' AND release_id = ?",
+                         (release.get("country") or "", barcode, rid))
+        filled += 1
+    return filled
 
 
 def price_wanted_albums(conn: sqlite3.Connection, client: DiscogsClient, currency: str | None,
@@ -375,7 +446,7 @@ def _with_prices(item: dict, history: list[dict]) -> dict:
         "added_lowest_price": added.get("lowest_price"),
         "added_currency": added.get("nm_currency") or added.get("lowest_currency"),
         "added_checked_at": added.get("fetched_at"),
-        # Like for like: the CD's own price (postage excluded), in the same currency.
+        # Like for like: the CD's price, in the same currency (neither side includes postage).
         "vs_paid_pct": _pct_change(nm, paid) if paid_currency == nm_currency else None,
         "listed_vs_paid_pct": _pct_change(lowest, paid) if paid_currency == lowest_currency else None,
         "discogs_url": f"https://www.discogs.com/release/{item['release_id']}",
@@ -385,8 +456,9 @@ def _with_prices(item: dict, history: list[dict]) -> dict:
 
 
 _COLLECTION_SELECT = """
-    SELECT u.release_id, u.artist, u.title, u.year, u.format, u.label, u.catno, u.date_added,
-           p.price_paid, p.shipping_paid, p.currency AS paid_currency, p.purchased_on
+    SELECT u.release_id, u.artist, u.title, u.year, u.format, u.format_details, u.label, u.catno,
+           u.country, u.barcode, u.media_condition, u.sleeve_condition, u.notes, u.date_added,
+           p.price_paid, p.currency AS paid_currency, p.purchased_on
     FROM user_items AS u LEFT JOIN user_purchases AS p USING (release_id)
     WHERE u.list = 'collection' AND u.active = 1"""
 _ITEM_PRICES_SELECT = ("SELECT release_id, fetched_at, nm_price, nm_currency, lowest_price, "
@@ -414,19 +486,19 @@ def collection_item_detail(conn: sqlite3.Connection, release_id: int) -> dict | 
 
 
 def set_purchase(conn: sqlite3.Connection, release_id: int, *, price_paid: float, currency: str,
-                 shipping_paid: float | None = None, purchased_on: str | None = None) -> bool:
+                 purchased_on: str | None = None) -> bool:
     """Record what you paid for a collection item. False when it isn't in your collection."""
     if conn.execute("SELECT 1 FROM user_items WHERE list = 'collection' AND active = 1 "
                     "AND release_id = ?", (release_id,)).fetchone() is None:
         return False
     with conn:
         conn.execute(
-            "INSERT INTO user_purchases (release_id, price_paid, shipping_paid, currency, "
-            "purchased_on, updated_at) VALUES (?, ?, ?, ?, ?, ?) "
+            "INSERT INTO user_purchases (release_id, price_paid, currency, purchased_on, "
+            "updated_at) VALUES (?, ?, ?, ?, ?) "
             "ON CONFLICT (release_id) DO UPDATE SET price_paid = excluded.price_paid, "
-            "shipping_paid = excluded.shipping_paid, currency = excluded.currency, "
-            "purchased_on = excluded.purchased_on, updated_at = excluded.updated_at",
-            (release_id, price_paid, shipping_paid, currency, purchased_on, db.utc_now_iso()))
+            "currency = excluded.currency, purchased_on = excluded.purchased_on, "
+            "updated_at = excluded.updated_at",
+            (release_id, price_paid, currency, purchased_on, db.utc_now_iso()))
     return True
 
 
@@ -446,8 +518,7 @@ def _paid_totals(items: list[dict], currency: str | None) -> dict:
     return {
         "items": len(paid),
         "currency": currency,
-        "total": round(sum(i["price_paid"] + (i["shipping_paid"] or 0) for i in mine), 2),
-        "shipping": round(sum(i["shipping_paid"] or 0 for i in mine), 2),
+        "total": round(sum(i["price_paid"] for i in mine), 2),
         "other_currencies": len(paid) - len(mine),
         "compared": len(compared),
         "compared_paid": then,
@@ -492,6 +563,8 @@ def sync_me(conn: sqlite3.Connection, client: DiscogsClient | None = None, *,
     ).fetchone()
     log.info("Synced %s's wantlist (%d items, %d albums) and collection (%d items)",
              username, counts["want"], albums, counts["collection"])
+    if details := fill_collection_details(conn, client):
+        log.info("Looked up the country and barcode of %d collection items", details)
     priced = price_wanted_albums(conn, client, currency)
     items_priced = price_collection_items(conn, client)
     value = record_collection_value(conn, client, username)

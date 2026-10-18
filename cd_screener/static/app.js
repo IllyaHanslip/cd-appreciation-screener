@@ -1229,10 +1229,24 @@
     listed: ["asc", "cheapest first", "most expensive first"],
     change: ["desc", "biggest rise first", "biggest drop first"],
     vspaid: ["desc", "biggest gain first", "biggest loss first"],
+    condition: ["desc", "best condition first", "worst condition first"],
     added: ["asc", "oldest first", "normal order"],
   };
+  // Discogs' condition grades, best first, with their short forms.
+  const GRADES = [["Mint (M)", "M"], ["Near Mint (NM or M-)", "NM"], ["Very Good Plus (VG+)", "VG+"],
+    ["Very Good (VG)", "VG"], ["Good Plus (G+)", "G+"], ["Good (G)", "G"], ["Fair (F)", "F"], ["Poor (P)", "P"]];
+  const gradeShort = (text) => (GRADES.find(([long]) => long === text) || [null, text])[1];
+
+  /** 8 for Mint down to 1 for Poor; 0 when not graded (not set, Generic, No Cover). */
+  function gradeRank(text) {
+    const index = GRADES.findIndex(([long]) => long === text);
+    return index < 0 ? 0 : GRADES.length - index;
+  }
+
   const COLLECTION_VALUE = {
     title: (i) => i.title.toLowerCase(),
+    // Media condition first; the sleeve breaks ties.
+    condition: (i) => (gradeRank(i.media_condition) ? gradeRank(i.media_condition) * 10 + gradeRank(i.sleeve_condition) : null),
     paid: (i) => i.price_paid,
     value: (i) => i.nm_price,
     listed: (i) => (i.num_for_sale === 0 ? null : i.lowest_price),
@@ -1259,7 +1273,7 @@
       return;
     }
     $("col-paid").textContent = fmtMoney(p.total, p.currency);
-    sub.replaceChildren(`${p.items} of ${total} CDs${p.shipping ? `, incl. ${fmtMoney(p.shipping, p.currency)} postage` : ""}`);
+    sub.replaceChildren(`for ${p.items} of your ${total} CDs`);
     if (p.compared) {
       sub.append(el("br"), `NM estimates now ${fmtMoney(p.compared_now, p.currency)} vs ${fmtMoney(p.compared_paid, p.currency)} paid `,
         deltaNode(p.change_pct));
@@ -1275,16 +1289,25 @@
     return "Nothing to compare with";
   }
 
+  /** "NM / VG+": media / sleeve condition from your Discogs collection (full names on hover). */
+  function conditionCell(i) {
+    if (!i.media_condition && !i.sleeve_condition) {
+      return el("td", { class: "col-condition" }, el("span", { class: "muted", text: "—", title: "Not set in your Discogs collection" }));
+    }
+    return el("td", { class: "col-condition", title: `Media: ${i.media_condition || "not set"}\nSleeve: ${i.sleeve_condition || "not set"}` },
+      `${gradeShort(i.media_condition) || "—"} / ${gradeShort(i.sleeve_condition) || "—"}`);
+  }
+
   function renderCollection() {
     const money = (value, currency) => (value == null ? "—" : fmtMoney(value, currency));
     const rows = sortRows(collectionItems, collectionSort, COLLECTION_VALUE);
     $("col-rows").replaceChildren(...rows.map((i) => el("tr", { "data-release": i.release_id, tabindex: "0" },
       el("td", { class: "title-cell" }, el("div", { class: "title", text: i.title }), el("div", { class: "sub", text: i.artist })),
       el("td", { class: "col-pressing" }, el("div", { text: [i.label, i.catno].filter(Boolean).join(" · ") || "—" }),
-        el("div", { class: "sub", text: [i.format, i.year].filter(Boolean).join(", ") })),
+        el("div", { class: "sub", text: [i.format_details || i.format, i.country, i.year].filter(Boolean).join(" · ") })),
+      conditionCell(i),
       el("td", { class: "num" },
-        i.price_paid == null ? el("span", { class: "muted", text: "—", title: vsPaidHint(i) }) : fmtMoney(i.price_paid, i.paid_currency),
-        i.shipping_paid ? el("div", { class: "sub", text: `+ ${fmtMoney(i.shipping_paid, i.paid_currency)} postage` }) : null),
+        i.price_paid == null ? el("span", { class: "muted", text: "—", title: vsPaidHint(i) }) : fmtMoney(i.price_paid, i.paid_currency)),
       el("td", { class: "num", text: money(i.nm_price, i.nm_currency),
         title: i.nm_price == null ? (i.checked_at ? "Discogs has no Near Mint estimate for this pressing" : "Not priced yet: the next daily run checks it") : null }),
       el("td", { class: "num" },
@@ -1329,8 +1352,7 @@
       el("td", { class: "note-cell", text: note || "" }));
     const notChecked = i.checked_at ? null : "not checked yet: the next daily run prices it";
     const parts = [
-      el("div", { class: "chips" }, ...[i.format, i.year, [i.label, i.catno].filter(Boolean).join(" · ")]
-        .filter(Boolean).map((text) => el("span", { class: "chip", text }))),
+      copySection(i),
       el("section", {},
         el("h3", { class: "section-title", text: "Price check" }),
         el("table", { class: "market-table" }, el("tbody", {},
@@ -1367,6 +1389,23 @@
     $("drawer-body").replaceChildren(...parts);
   }
 
+  /** Which edition you have and its condition, from your Discogs collection. */
+  function copySection(i) {
+    const rows = [
+      ["Edition", i.format_details || i.format],
+      ["Label · cat. no.", [i.label, i.catno].filter(Boolean).join(" · ")],
+      ["Country · year", [i.country, i.year].filter(Boolean).join(" · ")],
+      ["Barcode", i.barcode],
+      ["Media condition", i.media_condition || "not set on Discogs"],
+      ["Sleeve condition", i.sleeve_condition || "not set on Discogs"],
+      ["Your notes", i.notes],
+    ].filter(([, value]) => value);
+    return el("section", {},
+      el("h3", { class: "section-title", text: "Your copy" }),
+      el("dl", { class: "kv" }, ...rows.flatMap(([k, v]) => [el("dt", { text: k }), el("dd", { text: String(v) })])),
+      el("p", { class: "note", text: "The exact release and conditions from your Discogs collection. Change them on Discogs and the next daily sync updates them here." }));
+  }
+
   /** What you paid, compared with today's prices, plus the form to add or change it. */
   function paidSection(i, row, status) {
     const paid = i.price_paid != null;
@@ -1374,8 +1413,6 @@
     const field = (label, input) => el("label", { class: "field" }, el("span", { class: "field-label", text: label }), input);
     const price = el("input", { type: "number", name: "price_paid", min: "0", max: "1000000", step: "0.01",
       inputmode: "decimal", required: true, value: paid ? i.price_paid : "" });
-    const shipping = el("input", { type: "number", name: "shipping_paid", min: "0", max: "1000000", step: "0.01",
-      inputmode: "decimal", placeholder: "optional", value: i.shipping_paid ?? "" });
     const currency = el("select", { name: "currency" },
       ...[...new Set([cur, "GBP", "EUR", "USD", "JPY"])].map((c) => el("option", { value: c, text: c, selected: c === cur })));
     const day = el("input", { type: "date", name: "purchased_on", max: localISODate(new Date()),
@@ -1385,8 +1422,7 @@
     const save = el("button", { type: "submit", class: "button-primary", text: paid ? "Update" : "Save" });
     const remove = paid ? el("button", { type: "button", class: "button-ghost", text: "Remove" }) : null;
     const form = el("form", { class: "paid-form" },
-      field("Price paid (the CD)", price), field("Postage paid", shipping),
-      field("Currency", currency), field("Date bought", day),
+      field("Price paid", price), field("Currency", currency), field("Date bought", day),
       el("div", { class: "form-actions" }, save, remove), statusLine);
 
     async function send(method, payload, done) {
@@ -1404,21 +1440,19 @@
     }
     form.addEventListener("submit", (event) => {
       event.preventDefault();
-      send("PUT", { price_paid: price.value, shipping_paid: shipping.value, currency: currency.value,
-        purchased_on: day.value }, "Saved.");
+      send("PUT", { price_paid: price.value, currency: currency.value, purchased_on: day.value }, "Saved.");
     });
     if (remove) remove.addEventListener("click", () => send("DELETE", null, "Removed."));
 
-    const total = paid && i.shipping_paid ? ` + ${fmtMoney(i.shipping_paid, i.paid_currency)} postage = ${fmtMoney(i.price_paid + i.shipping_paid, i.paid_currency)}` : "";
     const comparison = !paid
-      ? el("p", { class: "note", text: "Add what you paid to compare it with today’s prices. What you enter stays on this computer." })
+      ? el("p", { class: "note", text: "Add what you paid for the CD to compare it with today’s prices. What you enter stays on this computer." })
       : el("table", { class: "market-table" }, el("tbody", {},
         row("You paid", fmtMoney(i.price_paid, i.paid_currency),
-          `${i.purchased_on ? `on ${fmtDate(`${i.purchased_on}T00:00`)}` : "date not set"}${total}`),
+          i.purchased_on ? `on ${fmtDate(`${i.purchased_on}T00:00`)}` : "date not set"),
         row("NM estimate vs paid", i.vs_paid_pct != null ? deltaNode(i.vs_paid_pct) : "—",
-          i.vs_paid_pct != null ? `${fmtMoney(i.nm_price, i.nm_currency)} now, for the CD alone` : vsPaidHint(i)),
+          i.vs_paid_pct != null ? `${fmtMoney(i.nm_price, i.nm_currency)} now` : vsPaidHint(i)),
         row("Cheapest copy vs paid", i.listed_vs_paid_pct != null ? deltaNode(i.listed_vs_paid_pct) : "—",
-          i.listed_vs_paid_pct != null ? `${fmtMoney(i.lowest_price, i.lowest_currency)} now, before postage` : "nothing to compare with yet")));
+          i.listed_vs_paid_pct != null ? `${fmtMoney(i.lowest_price, i.lowest_currency)} now` : "nothing to compare with yet")));
     return el("section", {}, el("h3", { class: "section-title", text: "What you paid" }), comparison, form);
   }
 

@@ -327,8 +327,7 @@ def create_app(db_path: Path | str | None = None) -> Flask:
             raise ApiError("'currency' must be a 3-letter code such as GBP")
         saved = mydiscogs.set_purchase(
             get_db(), release_id, price_paid=_money_field(body, "price_paid", required=True),
-            shipping_paid=_money_field(body, "shipping_paid"), currency=currency,
-            purchased_on=_date_field(body, "purchased_on"))
+            currency=currency, purchased_on=_date_field(body, "purchased_on"))
         if not saved:
             raise ApiError(f"Release {release_id} is not in your collection", 404)
         return collection_item(release_id)

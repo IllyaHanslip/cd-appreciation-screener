@@ -5,11 +5,12 @@ import pytest
 from cd_screener import mydiscogs
 
 
-def want(release_id, master_id, title="Mr Beast", fmt="CD", added="2026-01-01T00:00:00-08:00"):
-    return {"id": release_id, "date_added": added,
+def want(release_id, master_id, title="Mr Beast", fmt="CD", added="2026-01-01T00:00:00-08:00",
+         notes=(), formats=None):
+    return {"id": release_id, "date_added": added, "notes": list(notes),
             "basic_information": {"id": release_id, "master_id": master_id, "title": title,
                                   "year": 2006, "artists": [{"name": "Mogwai (2)"}],
-                                  "formats": [{"name": fmt}],
+                                  "formats": formats or [{"name": fmt}],
                                   "labels": [{"name": "PIAS", "catno": f"CAT{release_id}"}]}}
 
 
@@ -30,6 +31,12 @@ class FakeClient:
             return {"curr_abbr": "GBP"}
         if path.endswith("/collection/value"):
             return {"minimum": "£18.55", "median": "£1,055.06", "maximum": "£169.94"}
+        if path.endswith("/collection/fields"):  # fields are matched by name; others are ignored
+            return {"fields": [{"id": 1, "name": "Media Condition"}, {"id": 2, "name": "Sleeve Condition"},
+                               {"id": 3, "name": "Notes"}, {"id": 4, "name": "Where bought"}]}
+        if path.startswith("/releases/"):
+            return {"country": "UK", "identifiers": [{"type": "Label Code", "value": "LC 5678"},
+                                                     {"type": "Barcode", "value": "5 017615 805024"}]}
         items, key = (self.wants, "wants") if path.endswith("/wants") else (self.collection, "releases")
         page, per_page = params["page"], params["per_page"]
         pages = max(1, -(-len(items) // per_page))
@@ -161,8 +168,7 @@ def test_collection_compares_with_last_week_what_you_paid_and_when_added(conn):
         add_check(conn, "user_item_prices", 9, fetched_at, nm_price=nm, nm_currency="GBP",
                   lowest_price=low, lowest_currency="GBP", num_for_sale=2)
     add_check(conn, "user_item_prices", 10, "2026-10-11T12:00:00Z", nm_price=20.0, nm_currency="GBP")
-    assert mydiscogs.set_purchase(conn, 9, price_paid=8.0, shipping_paid=2.5, currency="GBP",
-                                  purchased_on="2026-10-09")
+    assert mydiscogs.set_purchase(conn, 9, price_paid=8.0, currency="GBP", purchased_on="2026-10-09")
     assert not mydiscogs.set_purchase(conn, 999, price_paid=1.0, currency="GBP")  # not yours
 
     items = {i["release_id"]: i for i in mydiscogs.collection_items(conn)}
@@ -173,10 +179,33 @@ def test_collection_compares_with_last_week_what_you_paid_and_when_added(conn):
     assert (cd["vs_paid_pct"], cd["listed_vs_paid_pct"]) == (50.0, -37.5)  # 12 and 5 vs 8 paid
     assert items[10]["added_nm_price"] is None
     paid = mydiscogs.collection_summary(conn)["paid"]
-    assert (paid["items"], paid["total"], paid["shipping"], paid["change_pct"]) == (1, 10.5, 2.5, 50.0)
+    assert (paid["items"], paid["total"], paid["change_pct"]) == (1, 8.0, 50.0)
 
     mydiscogs.set_purchase(conn, 9, price_paid=8.0, currency="EUR")  # no exchange rates yet
     assert mydiscogs.collection_item_detail(conn, 9)["vs_paid_pct"] is None
     assert mydiscogs.collection_summary(conn)["paid"]["other_currencies"] == 1
     assert mydiscogs.clear_purchase(conn, 9)
     assert mydiscogs.collection_item_detail(conn, 9)["price_paid"] is None
+
+
+def test_collection_records_your_edition_and_its_condition(conn):
+    graded = want(9, 18032, notes=[{"field_id": 1, "value": "Near Mint (NM or M-)"},
+                                   {"field_id": 2, "value": "Very Good Plus (VG+)"},
+                                   {"field_id": 3, "value": "  "},  # blank: ignored
+                                   {"field_id": 4, "value": "Oxfam"}],  # a field of your own
+                  formats=[{"name": "CD", "qty": "1", "descriptions": ["Album", "Remastered"], "text": "Digipak"},
+                           {"name": "DVD", "qty": "2", "descriptions": ["NTSC"]}])
+    client = FakeClient([want(1, 77)], [graded, want(10, None, "Demo")])
+    mydiscogs.sync_me(conn, client)
+    items = {i["release_id"]: i for i in mydiscogs.collection_items(conn)}
+    cd = items[9]
+    assert cd["format_details"] == "CD, Album, Remastered, Digipak + 2×DVD, NTSC"
+    assert (cd["media_condition"], cd["sleeve_condition"], cd["notes"]) == (
+        "Near Mint (NM or M-)", "Very Good Plus (VG+)", None)
+    assert (cd["country"], cd["barcode"]) == ("UK", "5 017615 805024")  # from /releases, once
+    assert items[10]["media_condition"] is None  # not set on Discogs
+    assert sorted(c for c in client.calls if c.startswith("/releases/")) == ["/releases/10", "/releases/9"]
+
+    again = FakeClient([want(1, 77)], [graded, want(10, None, "Demo")])
+    mydiscogs.sync_me(conn, again, force=True)
+    assert not any(c.startswith("/releases/") for c in again.calls)  # already looked up

@@ -94,17 +94,18 @@
           </figcaption>
           <div id="col-chart"></div>
         </figure>
-        <p class="note view-note">Each CD is priced once a day: Discogs&rsquo; <strong>NM estimate</strong> for your exact pressing (its suggested price for a Near Mint copy) and the <strong>lowest listed</strong> copy for sale in any condition. Prices are for the CD alone &mdash; Discogs doesn&rsquo;t share postage costs through its API. Click a CD for its daily price graph and to add what you paid.</p>
+        <p class="note view-note">Each CD is priced once a day: Discogs&rsquo; <strong>NM estimate</strong> for your exact pressing (its suggested price for a Near Mint copy) and the <strong>lowest listed</strong> copy for sale in any condition. Prices are for the CD alone &mdash; Discogs doesn&rsquo;t share postage costs through its API. <strong>Condition</strong> (media / sleeve) and the edition come from your Discogs collection. Click a CD for its daily price graph, its full details and to add what you paid.</p>
         <div class="table-wrap">
           <table class="leaderboard" id="collection-table">
             <thead><tr>
               <th scope="col" data-ccol="title"><button type="button" data-csort="title">Release</button></th>
               <th scope="col" class="th-pad col-pressing">Pressing</th>
-              <th scope="col" class="num" data-ccol="paid"><button type="button" data-csort="paid" title="What you paid for the CD itself (postage shown underneath). Click a CD to add or change it.">Paid</button></th>
+              <th scope="col" class="col-condition" data-ccol="condition"><button type="button" data-csort="condition" title="Media / sleeve condition, as set in your Discogs collection">Condition</button></th>
+              <th scope="col" class="num" data-ccol="paid"><button type="button" data-csort="paid" title="What you paid for the CD. Click a CD to add or change it.">Paid</button></th>
               <th scope="col" class="num" data-ccol="value"><button type="button" data-csort="value" title="Discogs' suggested price for a Near Mint copy of this exact pressing">NM estimate</button></th>
               <th scope="col" class="num" data-ccol="listed"><button type="button" data-csort="listed" title="Cheapest copy of this exact pressing for sale now, any condition, before postage">Lowest listed</button></th>
               <th scope="col" class="num" data-ccol="change"><button type="button" data-csort="change" title="Change in the NM estimate over the last 7 days (rolling). Until there's a week of checks it's since the first check, and the date is shown under the value.">Change since last week</button></th>
-              <th scope="col" class="num" data-ccol="vspaid"><button type="button" data-csort="vspaid" title="NM estimate now compared with what you paid for the CD (postage left out on both sides)">Value vs paid</button></th>
+              <th scope="col" class="num" data-ccol="vspaid"><button type="button" data-csort="vspaid" title="NM estimate now compared with what you paid for the CD">Value vs paid</button></th>
               <th scope="col" class="col-added" data-ccol="added"><button type="button" data-csort="added" title="When you added it to your Discogs collection">Added</button></th>
             </tr></thead>
             <tbody id="col-rows"></tbody>
