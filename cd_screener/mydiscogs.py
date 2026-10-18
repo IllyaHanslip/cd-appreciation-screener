@@ -38,7 +38,6 @@ from .seed import clean_artist_name
 log = logging.getLogger(__name__)
 
 _SYMBOLS = {"£": "GBP", "$": "USD", "€": "EUR", "¥": "JPY"}
-ADDED_WINDOW_DAYS = 3  # a check this soon after an item joins the collection = "value when added"
 
 
 def _today_start() -> str:
@@ -63,12 +62,24 @@ def _pct_change(now: float | None, before: float | None) -> float | None:
     return round((now / before - 1) * 100, 1) if now and before else None
 
 
-def _previous_check(latest: Mapping | None, previous: Mapping | None) -> dict:
-    """When the comparison check was: normally yesterday, longer after days the PC was off."""
-    if not latest or not previous:
-        return {"previous_checked_at": None, "days_since_previous": None}
-    gap = _local_day(latest["fetched_at"]) - _local_day(previous["fetched_at"])
-    return {"previous_checked_at": previous["fetched_at"], "days_since_previous": gap.days}
+def _week_change(daily: list[dict], price: str, currency: str) -> dict:
+    """Change since last week, as a rolling window.
+
+    Compares the latest check with the last one at least CHANGE_WINDOW_DAYS days earlier
+    (exactly a week before, unless the PC was off that day). Until there's a week of
+    history it compares with the first check. Returns the % change, the check it was
+    compared with and how many days apart the two are.
+    """
+    latest = daily[-1] if daily else {}
+    now = latest.get(price)
+    earlier = [h for h in daily[:-1] if h[price] is not None and h[currency] == latest.get(currency)]
+    if now is None or not earlier:
+        return {"pct": None, "since": None, "days": None}
+    today = _local_day(latest["fetched_at"])
+    target = today - timedelta(days=config.CHANGE_WINDOW_DAYS)
+    base = next((h for h in reversed(earlier) if _local_day(h["fetched_at"]) <= target), earlier[0])
+    return {"pct": _pct_change(now, base[price]), "since": base["fetched_at"],
+            "days": (today - _local_day(base["fetched_at"])).days}
 
 
 def _pages(client: DiscogsClient, path: str, key: str) -> Iterator[Mapping[str, Any]]:
@@ -273,14 +284,13 @@ def wanted_albums(conn: sqlite3.Connection) -> list[dict]:
         history = prices.get(key, [])
         daily = _last_per_day(history)
         latest = daily[-1] if daily else None
-        previous = daily[-2] if len(daily) > 1 else None
         earlier = [h["lowest_price"] for h in daily[:-1][-config.USUAL_LISTING_DAYS:]
                    if h["lowest_price"] is not None]
         usual = sorted(earlier)[len(earlier) // 2] if len(earlier) >= config.USUAL_LISTING_MIN_OBS else None
         first = next((h["lowest_price"] for h in history if h["lowest_price"] is not None), None)
         now = latest["lowest_price"] if latest else None
         below_usual = round((1 - now / usual) * 100, 1) if now and usual else None
-        same_currency = previous is not None and previous["currency"] == latest["currency"]
+        week = _week_change(daily, "lowest_price", "currency")
         out.append({
             **a, "artist": artist, "title": title,
             "lowest_price": now,
@@ -289,9 +299,10 @@ def wanted_albums(conn: sqlite3.Connection) -> list[dict]:
             "checked_at": latest["fetched_at"] if latest else None,
             "usual_price": usual,
             "below_usual_pct": below_usual,
-            # Today's cheapest copy vs the previous day's check (normally yesterday).
-            "day_change_pct": _pct_change(now, previous["lowest_price"]) if same_currency else None,
-            **_previous_check(latest, previous),
+            # The cheapest copy now vs a week ago (vs the first check until there's a week).
+            "week_change_pct": week["pct"],
+            "week_since": week["since"],
+            "week_days": week["days"],
             "change_pct": _pct_change(now, first),
             # When this album's price was first checked: the start of "change since first check".
             "first_checked_at": history[0]["fetched_at"] if history else None,
@@ -331,15 +342,16 @@ def _value_when_added(date_added: str | None, daily: list[dict]) -> dict | None:
     for h in daily:
         checked = datetime.fromisoformat(h["fetched_at"])
         if checked >= added:
-            return h if checked - added <= timedelta(days=ADDED_WINDOW_DAYS) else None
+            return h if checked - added <= timedelta(days=config.ADDED_WINDOW_DAYS) else None
     return None
 
 
 def _with_prices(item: dict, history: list[dict]) -> dict:
-    """Add an item's latest prices, its day-on-day change and the comparison with what you paid."""
+    """Add an item's latest prices, its change over the last week and the comparison with
+    what you paid."""
     daily = _last_per_day(history)
     latest = daily[-1] if daily else {}
-    previous = daily[-2] if len(daily) > 1 else {}
+    week = _week_change(daily, "nm_price", "nm_currency")
     added = _value_when_added(item["date_added"], daily) or {}
     nm, nm_currency = latest.get("nm_price"), latest.get("nm_currency")
     lowest, lowest_currency = latest.get("lowest_price"), latest.get("lowest_currency")
@@ -351,12 +363,12 @@ def _with_prices(item: dict, history: list[dict]) -> dict:
         "lowest_currency": lowest_currency,
         "num_for_sale": latest.get("num_for_sale"),
         "checked_at": latest.get("fetched_at"),
-        # Day-on-day, on the NM estimate (the value) and on the cheapest copy for sale.
-        "day_change_pct": (_pct_change(nm, previous.get("nm_price"))
-                           if previous.get("nm_currency") == nm_currency else None),
-        "listed_day_change_pct": (_pct_change(lowest, previous.get("lowest_price"))
-                                  if previous.get("lowest_currency") == lowest_currency else None),
-        **_previous_check(latest, previous),
+        # Over the last week (since the first check until there's a week of history), on the
+        # NM estimate (the value) and on the cheapest copy for sale.
+        "week_change_pct": week["pct"],
+        "week_since": week["since"],
+        "week_days": week["days"],
+        "listed_week_change_pct": _week_change(daily, "lowest_price", "lowest_currency")["pct"],
         "days_tracked": len(daily),
         "first_checked_at": daily[0]["fetched_at"] if daily else None,
         "added_nm_price": added.get("nm_price"),

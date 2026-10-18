@@ -44,6 +44,10 @@ USUAL_LISTING_DAYS = 30  # "usual" = median listing over this many prior days
 USUAL_LISTING_MIN_OBS = 3  # ...from at least this many observations
 REISSUE_RECENT_YEARS = 2  # a CD pressing released this recently counts as a reissue risk
 
+# --- Your wantlist & collection ----------------------------------------------
+CHANGE_WINDOW_DAYS = 7  # "change since last week": vs the check this many days earlier (rolling)
+ADDED_WINDOW_DAYS = 3  # a check this soon after an item joins the collection = "value when added"
+
 # --- Pressing flags (dashboard) ------------------------------------------------
 RARE_PRESSING_PREMIUM = 3.0  # pressing NM estimate >= 3x the album's cheapest copy
 ESTIMATE_HIGH_RATIO = 1.5  # NM estimate >= 1.5x this pressing's cheapest listing

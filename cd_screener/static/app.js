@@ -203,13 +203,23 @@
     return node;
   }
 
-  /** Day-on-day change cell. After days the PC was off it says which day it compares with. */
-  function dayChangeCell(value, item) {
-    if (!item.previous_checked_at) {
+  /** Change since last week (rolling). Until there's a week of checks, or after the PC
+   *  was off a week ago, it says which day it compares with. */
+  function weekChangeCell(value, item) {
+    if (!item.week_since) {
       return el("td", { class: "num" }, el("span", { class: "muted", text: "—", title: "Shows after a second day of checks" }));
     }
     return el("td", { class: "num" }, deltaNode(value),
-      item.days_since_previous > 1 ? el("div", { class: "sub", text: `vs ${fmtDay(item.previous_checked_at)}` }) : null);
+      item.week_days !== 7 ? el("div", { class: "sub", text: `since ${fmtDay(item.week_since)}` }) : null);
+  }
+
+  /** Which check "since last week" compares with, in words. */
+  function weekNote(item) {
+    const since = fmtDate(item.week_since);
+    if (item.week_days === 7) return `vs ${since}, a week earlier`;
+    if (item.week_days > 7) return `vs ${since}, ${item.week_days} days earlier (no check exactly a week ago)`;
+    const fullWeek = new Date(new Date(item.week_since).getTime() + 7 * 86400000);
+    return `since the first check on ${since} · a full week from ${fmtDay(fullWeek)}`;
   }
 
   // -------------------------------------------------------------------- API
@@ -1053,7 +1063,7 @@
     variants: (a) => a.variants,
     cheapest: (a) => (a.num_for_sale === 0 ? null : a.lowest_price),
     usual: (a) => a.usual_price,
-    change: (a) => (a.previous_checked_at ? a.day_change_pct : null),
+    change: (a) => a.week_change_pct,
   };
   let wantSort = null; // { key, order } or null for the normal ordering
 
@@ -1088,7 +1098,7 @@
           a.num_for_sale ? el("div", { class: "sub", text: `${intFmt.format(a.num_for_sale)} for sale` }) : null),
         el("td", { class: "num", text: a.usual_price != null ? fmtMoney(a.usual_price, a.currency) : "—",
           title: a.usual_price == null ? `Needs ${3 - Math.min(days - 1, 3)} more day(s) of prices` : "Median of the previous 30 days" }),
-        dayChangeCell(a.day_change_pct, a),
+        weekChangeCell(a.week_change_pct, a),
         el("td", {}, el("div", { class: "cell-links" },
           link(a.cd_listings_url, "CD listings ↗"), link(a.album_url, "Album ↗"))));
       return tr;
@@ -1134,8 +1144,8 @@
               a.num_for_sale ? `${intFmt.format(a.num_for_sale)} for sale, any pressing or format` : "nothing for sale"),
             row("Usual price", a.usual_price != null ? fmtMoney(a.usual_price, cur) : "—",
               a.usual_price != null ? "median of the previous 30 days" : "after 3 earlier days of checks"),
-            row("Change since yesterday", a.previous_checked_at ? fmtSignedPct(a.day_change_pct) : "—",
-              a.previous_checked_at ? `vs ${fmtDate(a.previous_checked_at)}` : "after a second day of checks"),
+            row("Change since last week", a.week_since ? fmtSignedPct(a.week_change_pct) : "—",
+              a.week_since ? weekNote(a) : "after a second day of checks"),
             row("Change since first check", a.days_tracked > 1 ? fmtSignedPct(a.change_pct) : "—",
               `${a.first_checked_at ? `since ${fmtDate(a.first_checked_at)} · ` : ""}${a.days_tracked} day${a.days_tracked === 1 ? "" : "s"} of checks`))),
           el("p", { class: "note", text: "Item prices only: Discogs doesn’t share postage costs through its API, so a very cheap copy can still cost more once postage is added. Check the listing before buying." }),
@@ -1226,7 +1236,7 @@
     paid: (i) => i.price_paid,
     value: (i) => i.nm_price,
     listed: (i) => (i.num_for_sale === 0 ? null : i.lowest_price),
-    change: (i) => (i.previous_checked_at ? i.day_change_pct : null),
+    change: (i) => i.week_change_pct,
     vspaid: (i) => i.vs_paid_pct,
     added: (i) => (i.date_added ? Date.parse(i.date_added) : null),
   };
@@ -1280,7 +1290,7 @@
       el("td", { class: "num" },
         el("div", { text: i.num_for_sale === 0 ? "none for sale" : money(i.lowest_price, i.lowest_currency) }),
         i.num_for_sale ? el("div", { class: "sub", text: `${intFmt.format(i.num_for_sale)} for sale` }) : null),
-      dayChangeCell(i.day_change_pct, i),
+      weekChangeCell(i.week_change_pct, i),
       el("td", { class: "num" }, i.vs_paid_pct != null ? deltaNode(i.vs_paid_pct) : el("span", { class: "muted", text: "—", title: vsPaidHint(i) })),
       el("td", { class: "col-added", text: i.date_added ? fmtDate(i.date_added) : "—" }))));
     $("col-empty").hidden = rows.length > 0;
@@ -1318,7 +1328,6 @@
       el("th", { scope: "row", text: label }), el("td", { class: "num" }, value),
       el("td", { class: "note-cell", text: note || "" }));
     const notChecked = i.checked_at ? null : "not checked yet: the next daily run prices it";
-    const since = i.days_since_previous > 1 ? `vs ${fmtDate(i.previous_checked_at)}` : "vs yesterday";
     const parts = [
       el("div", { class: "chips" }, ...[i.format, i.year, [i.label, i.catno].filter(Boolean).join(" · ")]
         .filter(Boolean).map((text) => el("span", { class: "chip", text }))),
@@ -1330,9 +1339,9 @@
               : "Discogs has no estimate for this pressing")),
           row("Cheapest copy now", i.num_for_sale === 0 ? "none" : i.lowest_price != null ? fmtMoney(i.lowest_price, i.lowest_currency) : "—",
             notChecked || (i.num_for_sale ? `${intFmt.format(i.num_for_sale)} for sale, any condition · CD only, no postage` : "nothing for sale")),
-          row("Change since yesterday", i.previous_checked_at ? deltaNode(i.day_change_pct) : "—",
-            i.previous_checked_at
-              ? `NM estimate, ${since}${i.listed_day_change_pct != null ? ` · cheapest copy ${fmtSignedPct(i.listed_day_change_pct)}` : ""}`
+          row("Change since last week", i.week_since ? deltaNode(i.week_change_pct) : "—",
+            i.week_since
+              ? `NM estimate, ${weekNote(i)}${i.listed_week_change_pct != null ? ` · cheapest copy ${fmtSignedPct(i.listed_week_change_pct)}` : ""}`
               : "after a second day of checks"),
           row("When you added it", i.added_nm_price != null ? fmtMoney(i.added_nm_price, i.added_currency) : "—",
             i.added_checked_at

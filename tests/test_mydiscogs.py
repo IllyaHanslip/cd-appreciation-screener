@@ -106,18 +106,31 @@ def add_check(conn, table, key, fetched_at, **values):
     conn.commit()
 
 
-def test_wantlist_change_is_day_on_day(conn):
+def test_wantlist_change_since_last_week_is_a_rolling_window(conn):
     mydiscogs.sync_lists(conn, FakeClient([want(1, 77)]), "example_collector")
-    for fetched_at, price in [("2026-10-10T12:00:00Z", 10.0), ("2026-10-11T10:00:00Z", 9.0),
-                              ("2026-10-11T12:00:00Z", 8.0),  # a forced re-check: last one counts
-                              ("2026-10-13T12:00:00Z", 6.0)]:  # the PC was off on the 12th
+
+    def check(fetched_at, price):
         add_check(conn, "user_album_prices", "m77", fetched_at, lowest_price=price,
                   currency="GBP", num_for_sale=3)
+
+    def week():
+        album = mydiscogs.wanted_albums(conn)[0]
+        return album["week_change_pct"], album["week_since"], album["week_days"]
+
+    check("2026-10-10T12:00:00Z", 10.0)
+    check("2026-10-11T10:00:00Z", 9.0)
+    check("2026-10-11T12:00:00Z", 8.0)  # a forced re-check: the day's last one counts
+    check("2026-10-13T12:00:00Z", 6.0)
+    # Less than a week of checks: compared with the first one.
+    assert week() == (-40.0, "2026-10-10T12:00:00Z", 3)
     album = mydiscogs.wanted_albums(conn)[0]
-    assert album["day_change_pct"] == pytest.approx(-25.0)  # 6 vs 8 on the previous check day
-    assert (album["previous_checked_at"], album["days_since_previous"]) == ("2026-10-11T12:00:00Z", 2)
     assert album["change_pct"] == pytest.approx(-40.0) and album["days_tracked"] == 3
-    assert len(mydiscogs.wanted_album_detail(conn, "m77")["history"]) == 3  # one point per day
+
+    check("2026-10-19T12:00:00Z", 6.4)  # a week before is the 12th, when the PC was off
+    assert week() == (-20.0, "2026-10-11T12:00:00Z", 8)  # so the last check before it counts
+    check("2026-10-20T12:00:00Z", 7.2)  # exactly a week after the 13th
+    assert week() == (20.0, "2026-10-13T12:00:00Z", 7)
+    assert len(mydiscogs.wanted_album_detail(conn, "m77")["history"]) == 5  # one point per day
 
 
 def test_collection_items_are_priced_once_a_day(conn):
@@ -127,7 +140,7 @@ def test_collection_items_are_priced_once_a_day(conn):
     items = {i["release_id"]: i for i in mydiscogs.collection_items(conn)}
     assert (items[9]["nm_price"], items[9]["lowest_price"], items[9]["num_for_sale"]) == (12.0, 9.99, 1)
     assert items[10]["nm_price"] is None and items[10]["lowest_price"] == 9.99  # no NM suggestion
-    assert items[9]["day_change_pct"] is None and items[9]["previous_checked_at"] is None
+    assert items[9]["week_change_pct"] is None and items[9]["week_since"] is None  # one day only
 
     again = FakeClient([], collection)  # same day: nothing is priced twice
     assert mydiscogs.sync_me(conn, again, force=True)["collection_priced"] == 0
@@ -140,7 +153,7 @@ def test_collection_items_are_priced_once_a_day(conn):
     assert sorted(i["release_id"] for i in mydiscogs.collection_items(conn)) == [9, 11]
 
 
-def test_collection_compares_with_yesterday_what_you_paid_and_when_added(conn):
+def test_collection_compares_with_last_week_what_you_paid_and_when_added(conn):
     collection = [want(9, 18032, added="2026-10-10T08:00:00-07:00"),  # bought during tracking
                   want(10, None, "Demo")]  # added long before tracking began
     mydiscogs.sync_lists(conn, FakeClient([], collection), "example_collector")
@@ -154,7 +167,8 @@ def test_collection_compares_with_yesterday_what_you_paid_and_when_added(conn):
 
     items = {i["release_id"]: i for i in mydiscogs.collection_items(conn)}
     cd = items[9]
-    assert (cd["day_change_pct"], cd["listed_day_change_pct"], cd["days_since_previous"]) == (20.0, 25.0, 1)
+    # Under a week of history: compared with the first check, on the 10th.
+    assert (cd["week_change_pct"], cd["listed_week_change_pct"], cd["week_days"]) == (20.0, 25.0, 1)
     assert (cd["added_nm_price"], cd["added_checked_at"]) == (10.0, "2026-10-10T18:00:00Z")
     assert (cd["vs_paid_pct"], cd["listed_vs_paid_pct"]) == (50.0, -37.5)  # 12 and 5 vs 8 paid
     assert items[10]["added_nm_price"] is None

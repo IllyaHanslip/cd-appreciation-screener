@@ -229,7 +229,7 @@ def test_collection_prices_and_purchase_editing(client, db_path):
     add_collection_item(db_path)
     body = client.get("/api/me/collection").get_json()
     item = body["items"][0]
-    assert (item["nm_price"], item["lowest_price"], item["day_change_pct"]) == (11.0, 2.5, 10.0)
+    assert (item["nm_price"], item["lowest_price"], item["week_change_pct"]) == (11.0, 2.5, 10.0)
     assert item["price_paid"] is None and body["paid"]["items"] == 0
     assert len(client.get("/api/me/collection/42").get_json()["history"]) == 2
     assert client.get("/api/me/collection/999").status_code == 404
