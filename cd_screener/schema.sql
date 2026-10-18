@@ -118,6 +118,31 @@ CREATE TABLE IF NOT EXISTS collection_value_history (
     items         INTEGER NOT NULL
 );
 
+-- One price check per collection item per day: Discogs' Near Mint suggestion for your
+-- exact pressing, and the cheapest copy of it listed for sale (any condition).
+CREATE TABLE IF NOT EXISTS user_item_prices (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    release_id       INTEGER NOT NULL,
+    fetched_at       TEXT    NOT NULL,
+    nm_price         REAL,                             -- NULL when Discogs has no suggestion
+    nm_currency      TEXT,
+    lowest_price     REAL,                             -- NULL when no copies are for sale
+    lowest_currency  TEXT,
+    num_for_sale     INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_item_prices ON user_item_prices (release_id, id);
+
+-- What you paid for items in your collection (typed in on the dashboard, never from Discogs).
+CREATE TABLE IF NOT EXISTS user_purchases (
+    release_id    INTEGER PRIMARY KEY,
+    price_paid    REAL    NOT NULL CHECK (price_paid >= 0),  -- the CD itself
+    shipping_paid REAL    CHECK (shipping_paid >= 0),        -- postage, when known
+    currency      TEXT    NOT NULL,
+    purchased_on  TEXT,                                -- YYYY-MM-DD, optional
+    updated_at    TEXT    NOT NULL
+);
+
 -- Weekly market reports, frozen when published (the dashboard shows the latest one).
 CREATE TABLE IF NOT EXISTS reports (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,

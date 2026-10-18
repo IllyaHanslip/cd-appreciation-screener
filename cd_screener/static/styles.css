@@ -371,6 +371,10 @@ input[type="search"]:focus-visible, select:focus-visible { outline: 2px solid va
 .cell-links a { color: var(--accent-ink); font-weight: 600; text-decoration: none; font-size: 13px; }
 .cell-links a:hover { text-decoration: underline; }
 #col-chart-card { margin-bottom: 16px; }
+/* The collection table drops its least important columns when the drawer narrows it. */
+#view-collection .table-wrap { container: collection / inline-size; }
+@container collection (max-width: 980px) { .col-added { display: none; } }
+@container collection (max-width: 760px) { .col-pressing { display: none; } }
 
 /* ---------- weekly report (news card) ---------- */
 
@@ -586,7 +590,7 @@ input[type="search"]:focus-visible, select:focus-visible { outline: 2px solid va
 .flag-reissue::before { background: #d03b3b; }
 .button-link { display: inline-flex; align-items: center; text-decoration: none; white-space: nowrap; }
 
-.col-listed .sub { font-size: 12px; color: var(--text-secondary); }
+.col-listed .sub, .leaderboard td .sub { font-size: 12px; font-weight: 400; color: var(--text-secondary); }
 
 .delta { font-weight: 650; white-space: nowrap; }
 .delta.is-up { color: var(--delta-up); }
@@ -708,7 +712,8 @@ input[type="search"]:focus-visible, select:focus-visible { outline: 2px solid va
   transform: translate(-50%, calc(-100% - 12px));
 }
 .chart-tooltip strong { display: block; font-size: 14px; font-variant-numeric: tabular-nums; }
-.chart-tooltip span { color: var(--text-secondary); }
+.chart-tooltip > span { color: var(--text-secondary); }
+.chart-tooltip .tooltip-change { display: block; margin-top: 2px; }
 
 .link-button {
   all: unset;
@@ -749,6 +754,39 @@ input[type="search"]:focus-visible, select:focus-visible { outline: 2px solid va
 .market-table th { font-weight: 600; white-space: nowrap; }
 .market-table .num { text-align: right; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .market-table .note-cell { color: var(--text-secondary); font-size: 12px; }
+/* "What you paid" form in the collection drawer */
+.paid-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+.paid-form select { min-width: 0; width: 100%; }
+input[type="number"], input[type="date"] {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--axis);
+  border-radius: 8px;
+  background: var(--page);
+  color: var(--text-primary);
+  font: inherit;
+}
+input[type="number"]:hover, input[type="date"]:hover { border-color: var(--text-muted); }
+input[type="number"]:focus-visible, input[type="date"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; border-color: var(--accent); }
+.form-actions { grid-column: 1 / -1; display: flex; gap: 8px; }
+.button-primary {
+  height: 36px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent-ink);
+  color: var(--page);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.button-primary:hover { filter: brightness(1.1); }
+.button-primary:disabled, .button-ghost:disabled { opacity: 0.6; cursor: default; }
+.form-status { grid-column: 1 / -1; min-height: 18px; margin: 0; font-size: 12px; color: var(--text-secondary); }
+.form-status.is-error { color: var(--delta-down); }
+
 .callout {
   margin: 10px 0 0;
   padding: 8px 12px;

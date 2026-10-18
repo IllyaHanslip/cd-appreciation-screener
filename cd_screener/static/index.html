@@ -62,7 +62,7 @@
           </label>
           <label class="field field-check"><input type="checkbox" id="want-deals-only"> Only albums below their usual price</label>
         </section>
-        <p class="note view-note">Your wantlist grouped by album: all the variants you want of an album are priced together, once a day. <strong>Cheapest copy</strong> is Discogs&rsquo; album-wide lowest price (any pressing or format) &mdash; use <strong>CD listings</strong> for CD-only offers. Data provided by <a href="https://www.discogs.com/mywantlist">Discogs</a>.</p>
+        <p class="note view-note">Your wantlist grouped by album: all the variants you want of an album are priced together, once a day. <strong>Cheapest copy</strong> is Discogs&rsquo; album-wide lowest price (any pressing or format) &mdash; use <strong>CD listings</strong> for CD-only offers. Prices exclude postage, which Discogs doesn&rsquo;t share through its API. Click an album for its daily price graph. Data provided by <a href="https://www.discogs.com/mywantlist">Discogs</a>.</p>
         <div class="table-wrap">
           <table class="leaderboard" id="want-table">
             <thead><tr>
@@ -71,7 +71,7 @@
               <th scope="col" class="num" data-wcol="variants"><button type="button" data-wsort="variants" title="How many variants of this album are on your Discogs wantlist">Variants</button></th>
               <th scope="col" class="num" data-wcol="cheapest"><button type="button" data-wsort="cheapest" title="Cheapest copy of this album for sale now, any pressing or format">Cheapest copy</button></th>
               <th scope="col" class="num" data-wcol="usual"><button type="button" data-wsort="usual" title="Median cheapest copy over the previous 30 days of checks (needs 3+ days)">Usual price</button></th>
-              <th scope="col" class="num" data-wcol="change"><button type="button" data-wsort="change" title="Change in the cheapest copy since this album was first checked (date shown under each value)">Change since first check</button></th>
+              <th scope="col" class="num" data-wcol="change"><button type="button" data-wsort="change" title="Change in the cheapest copy since the previous daily check: normally yesterday (if the PC was off, the date compared with is shown)">Change since yesterday</button></th>
               <th scope="col" class="th-pad">Discogs</th>
             </tr></thead>
             <tbody id="want-rows"></tbody>
@@ -85,6 +85,7 @@
           <div class="tile tile-highlight"><span class="tile-label">Collection value (median)</span><span class="tile-value" id="col-median">&ndash;</span><span class="tile-sub" id="col-range">&nbsp;</span></div>
           <div class="tile"><span class="tile-label">Items</span><span class="tile-value" id="col-items">&ndash;</span><span class="tile-sub">in your Discogs collection</span></div>
           <div class="tile"><span class="tile-label">Change since tracking began</span><span class="tile-value" id="col-change">&ndash;</span><span class="tile-sub" id="col-since">&nbsp;</span></div>
+          <div class="tile"><span class="tile-label">What you paid</span><span class="tile-value" id="col-paid">&ndash;</span><span class="tile-sub" id="col-paid-sub">&nbsp;</span></div>
         </div>
         <figure class="chart-card card" id="col-chart-card">
           <figcaption>
@@ -93,16 +94,22 @@
           </figcaption>
           <div id="col-chart"></div>
         </figure>
+        <p class="note view-note">Each CD is priced once a day: Discogs&rsquo; <strong>NM estimate</strong> for your exact pressing (its suggested price for a Near Mint copy) and the <strong>lowest listed</strong> copy for sale in any condition. Prices are for the CD alone &mdash; Discogs doesn&rsquo;t share postage costs through its API. Click a CD for its daily price graph and to add what you paid.</p>
         <div class="table-wrap">
           <table class="leaderboard" id="collection-table">
             <thead><tr>
-              <th scope="col" class="th-pad">Release</th>
-              <th scope="col" class="th-pad">Pressing</th>
-              <th scope="col" class="num th-pad">Year</th>
-              <th scope="col" class="th-pad">Added</th>
+              <th scope="col" data-ccol="title"><button type="button" data-csort="title">Release</button></th>
+              <th scope="col" class="th-pad col-pressing">Pressing</th>
+              <th scope="col" class="num" data-ccol="paid"><button type="button" data-csort="paid" title="What you paid for the CD itself (postage shown underneath). Click a CD to add or change it.">Paid</button></th>
+              <th scope="col" class="num" data-ccol="value"><button type="button" data-csort="value" title="Discogs' suggested price for a Near Mint copy of this exact pressing">NM estimate</button></th>
+              <th scope="col" class="num" data-ccol="listed"><button type="button" data-csort="listed" title="Cheapest copy of this exact pressing for sale now, any condition, before postage">Lowest listed</button></th>
+              <th scope="col" class="num" data-ccol="change"><button type="button" data-csort="change" title="Change in the NM estimate since the previous daily check: normally yesterday (if the PC was off, the date compared with is shown)">Change since yesterday</button></th>
+              <th scope="col" class="num" data-ccol="vspaid"><button type="button" data-csort="vspaid" title="NM estimate now compared with what you paid for the CD (postage left out on both sides)">Value vs paid</button></th>
+              <th scope="col" class="col-added" data-ccol="added"><button type="button" data-csort="added" title="When you added it to your Discogs collection">Added</button></th>
             </tr></thead>
             <tbody id="col-rows"></tbody>
           </table>
+          <div class="empty" id="col-empty" hidden><p id="col-empty-text"></p></div>
         </div>
       </section>
 

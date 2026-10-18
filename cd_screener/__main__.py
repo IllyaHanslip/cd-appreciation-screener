@@ -84,8 +84,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", type=Path, help="folder for the Markdown copy (default: reports/)")
 
     p = sub.add_parser("sync-me", help="sync your Discogs wantlist + collection and price "
-                                       "wanted albums (also part of `daily`)")
-    p.add_argument("--force", action="store_true", help="resync even if already done today")
+                                       "them (also part of `daily`)")
+    p.add_argument("--force", action="store_true",
+                   help="resync even if already done today (only new items are priced again)")
 
     sub.add_parser("daily", help="scheduled job: fetch-prices (+ weekly report when due), "
                                  "logging to logs/daily.log; safe to run several times a day")
@@ -146,6 +147,8 @@ def _daily(conn) -> int:
         want_deals = sum(a["deal"] for a in mydiscogs.wanted_albums(conn))
         body += f" Wantlist: {me['albums']} albums checked"
         body += f", {want_deals} below their usual price." if want_deals else "."
+        if me["collection_priced"]:
+            body += f" Collection: {me['collection_priced']} CDs priced."
     if summary.report_period:
         body += f" New weekly report ({summary.report_period})."
     notify.toast("CD Screener: prices updated", body)
@@ -261,8 +264,8 @@ def main(argv: list[str] | None = None) -> int:
                 v = result["collection_value"]
                 print(f"Synced {result['username']}: {result['wants']} wantlist items in "
                       f"{result['albums']} albums ({result['priced']} priced today), "
-                      f"{result['collection']} in your collection (median value "
-                      f"{v['median']} {v['currency'] or ''})")
+                      f"{result['collection']} in your collection ({result['collection_priced']} "
+                      f"priced today; median value {v['median']} {v['currency'] or ''})")
         elif args.command == "analyze":
             analytics.run_analytics(conn)
         elif args.command == "report":

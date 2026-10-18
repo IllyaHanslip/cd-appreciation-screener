@@ -5,6 +5,9 @@
     GET /api/genres                genres present on the leaderboard
     GET /api/leaderboard           ?q= &genre= &min_growth= &max_growth= &sort= &order= &limit=
     GET /api/releases/<id>         one release: metadata, metrics, full price history
+    GET /api/me/wantlist           your wantlist by album (+ /<album_key> for one album)
+    GET /api/me/collection         your collection with daily prices (+ /<release_id>)
+    PUT/DELETE /api/me/collection/<release_id>/purchase   what you paid for an item
 """
 
 from __future__ import annotations
@@ -12,10 +15,13 @@ from __future__ import annotations
 import json
 import logging
 import math
+import re
 import sqlite3
 import statistics
 from contextlib import closing
+from datetime import date, timedelta
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from flask import Flask, Response, g, jsonify, request
 from werkzeug.exceptions import HTTPException
@@ -113,6 +119,51 @@ def _filter_clauses() -> tuple[str, dict]:
             raise ApiError(f"'flag' must be one of: {', '.join(FLAG_FILTERS)}")
         clauses.append(FLAG_FILTERS[flag])
     return (f" WHERE {' AND '.join(clauses)}" if clauses else ""), params
+
+
+_LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+def _require_local_request() -> None:
+    """Changes are accepted only from the dashboard itself, on this PC.
+
+    Blocks other websites (and DNS-rebinding tricks) from editing your data through the
+    local server: the Host must be local, and so must the Origin when the browser sends one.
+    """
+    host = urlsplit(f"//{request.host}").hostname
+    origin = request.headers.get("Origin")
+    if host not in _LOCAL_HOSTS or (origin and urlsplit(origin).hostname not in _LOCAL_HOSTS):
+        raise ApiError("Changes are only accepted from the dashboard on this computer", 403)
+
+
+def _money_field(body: dict, name: str, *, required: bool = False) -> float | None:
+    raw = body.get(name)
+    if raw is None or raw == "":
+        if required:
+            raise ApiError(f"'{name}' is required")
+        return None
+    if isinstance(raw, bool):
+        raise ApiError(f"'{name}' must be a number")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        raise ApiError(f"'{name}' must be a number, got {raw!r}") from None
+    if not math.isfinite(value) or not 0 <= value <= 1_000_000:
+        raise ApiError(f"'{name}' must be between 0 and 1,000,000")
+    return round(value, 2)
+
+
+def _date_field(body: dict, name: str) -> str | None:
+    raw = body.get(name)
+    if raw is None or raw == "":
+        return None
+    try:
+        day = date.fromisoformat(str(raw))
+    except ValueError:
+        raise ApiError(f"'{name}' must be a date like 2026-10-18") from None
+    if day > date.today() + timedelta(days=1):
+        raise ApiError(f"'{name}' can't be in the future")
+    return day.isoformat()
 
 
 def _escape_like(text: str) -> str:
@@ -254,6 +305,39 @@ def create_app(db_path: Path | str | None = None) -> Flask:
     @app.get("/api/me/collection")
     def my_collection():
         return mydiscogs.collection_summary(get_db())
+
+    def collection_item(release_id: int) -> dict:
+        item = mydiscogs.collection_item_detail(get_db(), release_id)
+        if item is None:
+            raise ApiError(f"Release {release_id} is not in your collection", 404)
+        return item
+
+    @app.get("/api/me/collection/<int:release_id>")
+    def my_collection_item(release_id: int):
+        return collection_item(release_id)
+
+    @app.put("/api/me/collection/<int:release_id>/purchase")
+    def set_purchase(release_id: int):
+        _require_local_request()
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            raise ApiError("Send the purchase as a JSON object")
+        currency = str(body.get("currency") or "").strip().upper()
+        if not re.fullmatch(r"[A-Z]{3}", currency):
+            raise ApiError("'currency' must be a 3-letter code such as GBP")
+        saved = mydiscogs.set_purchase(
+            get_db(), release_id, price_paid=_money_field(body, "price_paid", required=True),
+            shipping_paid=_money_field(body, "shipping_paid"), currency=currency,
+            purchased_on=_date_field(body, "purchased_on"))
+        if not saved:
+            raise ApiError(f"Release {release_id} is not in your collection", 404)
+        return collection_item(release_id)
+
+    @app.delete("/api/me/collection/<int:release_id>/purchase")
+    def clear_purchase(release_id: int):
+        _require_local_request()
+        mydiscogs.clear_purchase(get_db(), release_id)
+        return collection_item(release_id)
 
     @app.get("/api/reports/latest")
     def latest_report():

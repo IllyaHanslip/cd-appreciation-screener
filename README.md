@@ -127,7 +127,7 @@ minimised "CD Screener" window stops it. Pin it to the taskbar from the Start me
 | `python -m cd_screener fetch-prices` | 2 · Pricing | Prices the top 300 flagged releases at ≤ 60 req/min and appends to `price_history` |
 | `python -m cd_screener analyze` | 3 · Analytics | Computes appreciation metrics + Scarcity Index into `release_metrics` (also runs automatically after `fetch-prices`) |
 | `python -m cd_screener serve` | 4 · Dashboard | Starts the web app on http://127.0.0.1:5000 |
-| `python -m cd_screener sync-me` | Your Discogs | Syncs your wantlist and collection (the token identifies you, so no username is needed) and records today's prices. Wantlist variants are grouped by album and priced with **one request per album per day**, using Discogs' album-wide cheapest copy (any pressing or format); each album links to its CD-only marketplace listings. The collection is valued with Discogs' own valuation. Runs automatically in the daily job; see the **My wantlist** and **My collection** tabs. |
+| `python -m cd_screener sync-me` | Your Discogs | Syncs your wantlist and collection (the token identifies you, so no username is needed) and records today's prices. Wantlist variants are grouped by album and priced with **one request per album per day**, using Discogs' album-wide cheapest copy (any pressing or format); each album links to its CD-only marketplace listings. The collection is valued with Discogs' own valuation, and each CD in it is priced daily (its Near Mint estimate and cheapest listing, two requests per CD). Both tabs show the **change since yesterday** and a daily price graph per album or CD. In the collection you can type in what you paid (and the postage) to compare it with today's prices. Items you add or remove on Discogs are picked up by the next run. Runs automatically in the daily job; see the **My wantlist** and **My collection** tabs. |
 | `python -m cd_screener report` | Report | Publishes the weekly report now. `fetch-prices` does this automatically once 7 days have passed since the last report ended. The latest report is frozen and shown as a dated card at the top of the dashboard until the next one replaces it, and is also saved as `reports/report-YYYY-MM-DD.md` (biggest movers, deals, reissue alerts, supply changes). |
 | `python -m cd_screener demo` | 1→3 | `seed` + 180 days of simulated history + a simulated price run + analytics |
 
@@ -222,6 +222,9 @@ The leaderboard **Rank** is by Scarcity Index. Weights and windows live in `cd_s
 | `GET /api/releases/<id>` | One release: metadata, metrics, full price history, last 5 fetch attempts (404 if unknown) |
 | `GET /api/summary` | Funnel counts, data mode, missing-price counts, last fetch time |
 | `GET /api/genres` | Genres on the leaderboard with counts |
+| `GET /api/me/wantlist` | Your wantlist by album: cheapest copy, usual price, change since yesterday and since the first check (`/api/me/wantlist/<album_key>` adds the daily history) |
+| `GET /api/me/collection` | Your collection: each CD's NM estimate, cheapest listing, change since yesterday and what you paid, plus the collection's value history (`/api/me/collection/<release_id>` adds the daily history) |
+| `PUT` / `DELETE /api/me/collection/<release_id>/purchase` | Save or clear what you paid: JSON `price_paid`, `shipping_paid`, `currency`, `purchased_on`. Accepted only from the dashboard on the same computer. |
 
 Invalid parameters return `400` with an explanation. A missing or empty database returns
 `503` with the command to run.
@@ -255,7 +258,10 @@ cd-appreciation-screener/
 (append-only NM estimates), `listing_history` (cheapest listing and copies for sale per
 run), `master_snapshots` (album-wide cheapest copy), `fetch_log` (every fetch attempt and
 its outcome), `release_metrics` (latest analytics snapshot, rebuilt by every `analyze`).
-Older databases are upgraded automatically.
+For your own Discogs account: `user_items` (wantlist and collection), `user_album_prices`
+(daily cheapest copy per wanted album), `user_item_prices` (daily NM estimate and cheapest
+listing per collection CD), `user_purchases` (what you paid, typed in on the dashboard) and
+`collection_value_history`. Older databases are upgraded automatically.
 
 Each daily `fetch-prices` run makes two requests per CD (estimate and listing) plus one per
 album once a week, so pricing 300 CDs takes about 10–12 minutes.
@@ -285,8 +291,8 @@ to third parties, or displayed once it is more than six hours older than the inf
 on Discogs. So:
 
 - **Published here:** the code, tests, documentation and demo screenshots (fictional data).
-- **Never published:** the database (prices, listings, wantlist, collection), the weekly
-  reports and the logs. They are git-ignored and stay on the machine that runs the tool.
+- **Never published:** the database (prices, listings, wantlist, collection, what you
+  paid), the weekly reports and the logs. They are git-ignored and stay on the machine that runs the tool.
 - **Attribution:** the dashboard and reports show the required notice and
   "Data provided by Discogs", with links back to the relevant Discogs pages.
 - **Price history:** keeping a history of prices for analysis is a grey area in the terms
@@ -309,6 +315,11 @@ Discogs. 'Discogs' is a trademark of Zink Media, LLC.
   but the public API does not expose it. The closest condition-specific figure it offers
   is the *price suggestion* for each grade, which is based on past sales. This app tracks
   the Near Mint suggestion.
+- **No postage costs.** The API gives item prices only: shipping is set by each seller and
+  depends on where the buyer lives, and Discogs doesn't expose it. So a CD listed for a
+  few pence with expensive postage still shows up as the "cheapest copy". Comparing the
+  total price including postage is planned as part of the eBay comparison, because eBay's
+  Browse API includes shipping costs.
 - **Want/have in the data dumps.** Discogs' monthly XML dumps don't include community
   want/have counts. The simulator adds them to its synthetic dump. For real data,
   `ingest` reads them from the search API.

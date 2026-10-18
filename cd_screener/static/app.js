@@ -32,6 +32,32 @@
     return null;
   }
 
+  /** Sort rows in the browser by one column. Empty values always sort last. */
+  function sortRows(rows, sort, values) {
+    if (!sort) return rows;
+    const value = values[sort.key];
+    const direction = sort.order === "asc" ? 1 : -1;
+    return rows
+      .map((row, index) => ({ row, index, v: value(row) }))
+      .sort((x, y) => {
+        if (x.v == null || y.v == null) return (x.v == null) - (y.v == null) || x.index - y.index;
+        const cmp = typeof x.v === "string" ? x.v.localeCompare(y.v) : x.v - y.v;
+        return direction * cmp || x.index - y.index; // ties keep the normal ordering
+      })
+      .map((r) => r.row);
+  }
+
+  /** Show the sort arrow on the sorted column (aria-sort drives the CSS arrow). */
+  function updateSortArrows(table, attribute, sort) {
+    table.querySelectorAll(`thead th[${attribute}]`).forEach((th) => {
+      if (sort && th.getAttribute(attribute) === sort.key) {
+        th.setAttribute("aria-sort", sort.order === "asc" ? "ascending" : "descending");
+      } else {
+        th.removeAttribute("aria-sort");
+      }
+    });
+  }
+
   /** Add "Click to sort: …" to each sortable heading's tooltip. */
   function addSortHints(table, attribute, columns) {
     table.querySelectorAll(`button[${attribute}]`).forEach((button) => {
@@ -142,6 +168,23 @@
     return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
   }
 
+  /** "17 Oct": for daily data, where the year is obvious. */
+  function fmtDay(value) {
+    if (!value) return "—";
+    const d = value instanceof Date ? value : new Date(value);
+    return d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  }
+
+  /** Whole calendar days between two times, on this computer's clock. */
+  function calendarDays(later, earlier) {
+    return Math.round((new Date(later).setHours(0, 0, 0, 0) - new Date(earlier).setHours(0, 0, 0, 0)) / 86400000);
+  }
+
+  /** YYYY-MM-DD for a date on this computer's clock (what <input type="date"> uses). */
+  function localISODate(d) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+
   function ordinal(n) {
     const suffixes = ["th", "st", "nd", "rd"];
     const v = n % 100;
@@ -158,6 +201,15 @@
     }
     node.append(fmtSignedPct(value));
     return node;
+  }
+
+  /** Day-on-day change cell. After days the PC was off it says which day it compares with. */
+  function dayChangeCell(value, item) {
+    if (!item.previous_checked_at) {
+      return el("td", { class: "num" }, el("span", { class: "muted", text: "—", title: "Shows after a second day of checks" }));
+    }
+    return el("td", { class: "num" }, deltaNode(value),
+      item.days_since_previous > 1 ? el("div", { class: "sub", text: `vs ${fmtDay(item.previous_checked_at)}` }) : null);
   }
 
   // -------------------------------------------------------------------- API
@@ -422,8 +474,18 @@
   // ---------------------------------------------------------- detail drawer
 
   let detailRequest = null;
-  let chartObserver = null;
+  const chartObservers = []; // one per chart in the drawer
   let lastTrigger = null;
+
+  function disconnectCharts() {
+    chartObservers.splice(0).forEach((observer) => observer.disconnect());
+  }
+
+  function showDrawer() {
+    $("drawer").hidden = false;
+    document.body.classList.add("drawer-open");
+    $("drawer-body").classList.add("is-loading");
+  }
 
   function selectRow(id) {
     document.querySelectorAll("#rows tr.is-selected").forEach((tr) => tr.classList.remove("is-selected"));
@@ -436,9 +498,7 @@
     state.selectedId = id;
     lastTrigger = selectRow(id) || lastTrigger;
     history.replaceState(null, "", `#release-${id}`); // shareable deep link
-    $("drawer").hidden = false;
-    document.body.classList.add("drawer-open");
-    $("drawer-body").classList.add("is-loading");
+    showDrawer();
 
     if (detailRequest) detailRequest.abort();
     const controller = new AbortController();
@@ -463,7 +523,7 @@
     drawer.hidden = true;
     document.body.classList.remove("drawer-open");
     history.replaceState(null, "", location.pathname + location.search);
-    if (chartObserver) chartObserver.disconnect();
+    disconnectCharts();
     state.selectedId = null;
     selectRow(null);
     if (focusWasInside && lastTrigger && lastTrigger.isConnected) lastTrigger.focus();
@@ -489,7 +549,7 @@
       ? metricsGrid(release, metrics)
       : el("p", { class: "note", text: "No Near Mint price data for this release yet." }));
 
-    if (chartObserver) chartObserver.disconnect();
+    disconnectCharts();
     const points = history
       .filter((h) => h.currency === currency)
       .map((h) => ({ t: new Date(h.fetched_at), v: h.price }));
@@ -592,8 +652,10 @@
 
   // ------------------------------------------------------ price history chart
 
+  let chartCount = 0; // unique ids for each chart's data table
+
   function chartFigure(points, currency, title = "Near Mint price") {
-    const days = Math.max(1, Math.round((points[points.length - 1].t - points[0].t) / 86400000));
+    const days = calendarDays(points[points.length - 1].t, points[0].t) + 1;
     const container = el("div", {
       class: "chart",
       tabindex: "0",
@@ -602,22 +664,22 @@
     });
     const live = el("p", { class: "sr-only", "aria-live": "polite" });
     const table = historyTable(points, currency, title);
-    table.id = `history-table-${Date.now()}`;
+    table.id = `history-table-${++chartCount}`;
     table.hidden = true;
     const toggle = el("button", {
       type: "button", class: "link-button", "aria-expanded": "false", "aria-controls": table.id,
-      text: "Show data table",
+      text: "Show daily prices",
     });
     toggle.addEventListener("click", () => {
       table.hidden = !table.hidden;
       toggle.setAttribute("aria-expanded", String(!table.hidden));
-      toggle.textContent = table.hidden ? "Show data table" : "Hide data table";
+      toggle.textContent = table.hidden ? "Show daily prices" : "Hide daily prices";
     });
-    chartObserver = attachChart(container, live, points, currency);
+    chartObservers.push(attachChart(container, live, points, currency));
     return el("figure", { class: "chart-card" },
       el("figcaption", {},
         el("span", { class: "chart-title", text: title }),
-        el("span", { class: "chart-sub", text: `last ${days} day${days === 1 ? "" : "s"} · ${currency}` })),
+        el("span", { class: "chart-sub", text: `${fmtDay(points[0].t)} – ${fmtDay(points[points.length - 1].t)} · ${currency}` })),
       container, live, toggle, table);
   }
 
@@ -688,14 +750,28 @@
     box.replaceChildren(svg);
   }
 
+  /** Placeholder card for a chart that needs more days of data. */
+  function chartPlaceholder(title, text) {
+    return el("figure", { class: "chart-card" },
+      el("figcaption", {}, el("span", { class: "chart-title", text: title })),
+      el("p", { class: "note", text }));
+  }
+
+  /** Newest first, with each day's change from the check before it. */
   function historyTable(points, currency, valueLabel = "Near Mint price") {
-    const rows = points.slice().reverse().map((p) => el("tr", {},
-      el("td", { text: fmtDate(p.t) }),
-      el("td", { class: "num", text: fmtMoney(p.v, currency) })));
+    const rows = points.map((p, i) => {
+      const prev = points[i - 1];
+      return el("tr", {},
+        el("td", { text: fmtDate(p.t) }),
+        el("td", { class: "num", text: fmtMoney(p.v, currency) }),
+        el("td", { class: "num" }, prev ? deltaNode((p.v / prev.v - 1) * 100) : el("span", { class: "muted", text: "—" }),
+          prev ? el("span", { class: "muted", text: ` ${fmtSignedMoney(p.v - prev.v, currency)}` }) : null));
+    }).reverse();
     return el("table", { class: "history-table" },
       el("thead", {}, el("tr", {},
         el("th", { scope: "col", text: "Date" }),
-        el("th", { scope: "col", class: "num", text: valueLabel }))),
+        el("th", { scope: "col", class: "num", text: valueLabel }),
+        el("th", { scope: "col", class: "num", text: "Change" }))),
       el("tbody", {}, ...rows));
   }
 
@@ -737,6 +813,25 @@
     return ticks.filter((_, i) => i % stride === 0);
   }
 
+  /** X-axis ticks: month starts over long ranges, the check days themselves over short ones. */
+  function timeTicks(points, max) {
+    const t0 = points[0].t.getTime();
+    const t1 = points[points.length - 1].t.getTime();
+    if (t1 - t0 > 62 * 86400000) {
+      const multiYear = new Date(t0).getFullYear() !== new Date(t1).getFullYear();
+      return monthTicks(t0, t1, max).map((d) => ({
+        t: d.getTime(),
+        label: d.toLocaleDateString(undefined, multiYear ? { month: "short", year: "2-digit" } : { month: "short" }),
+      }));
+    }
+    const stride = Math.ceil(points.length / max);
+    const ticks = [];
+    for (let i = points.length - 1; i >= 0; i -= stride) { // the latest day is always labelled
+      ticks.unshift({ t: points[i].t.getTime(), label: fmtDay(points[i].t) });
+    }
+    return ticks;
+  }
+
   function attachChart(container, live, points, currency) {
     const tooltip = el("div", { class: "chart-tooltip", hidden: true });
     let geo = null;
@@ -753,7 +848,14 @@
       const plotH = height - m.top - m.bottom;
 
       const values = points.map((p) => p.v);
-      const { lo, hi, step, ticks } = niceTicks(Math.min(...values), Math.max(...values), 4);
+      let vMin = Math.min(...values);
+      let vMax = Math.max(...values);
+      const minSpan = Math.max(vMax * 0.1, 0.04); // a flat line still gets a sensible axis, never below 0
+      if (vMax - vMin < minSpan) {
+        vMin = Math.max(0, (vMin + vMax - minSpan) / 2);
+        vMax = vMin + minSpan;
+      }
+      const { lo, hi, step, ticks } = niceTicks(vMin, vMax, 4);
       const t0 = points[0].t.getTime();
       const t1 = points[points.length - 1].t.getTime();
       const x = (t) => m.left + ((t - t0) / (t1 - t0 || 1)) * plotW;
@@ -772,10 +874,14 @@
         label.textContent = fmtTick(tv, currency, step);
         svg.append(label);
       }
-      const multiYear = new Date(t0).getFullYear() !== new Date(t1).getFullYear();
-      for (const tick of monthTicks(t0, t1, Math.max(2, Math.floor(plotW / 70)))) {
-        const label = svgEl("text", { x: x(tick.getTime()), y: height - 8, class: "tick-label", "text-anchor": "middle" });
-        label.textContent = tick.toLocaleDateString(undefined, multiYear ? { month: "short", year: "2-digit" } : { month: "short" });
+      // Walk back from the latest day, dropping labels that would overlap the one after them.
+      const xTicks = [];
+      for (const tick of timeTicks(points, Math.max(2, Math.floor(plotW / 70))).reverse()) {
+        if (!xTicks.length || x(xTicks[xTicks.length - 1].t) - x(tick.t) >= 50) xTicks.push(tick);
+      }
+      for (const tick of xTicks) {
+        const label = svgEl("text", { x: x(tick.t), y: height - 8, class: "tick-label", "text-anchor": "middle" });
+        label.textContent = tick.label;
         svg.append(label);
       }
 
@@ -828,12 +934,18 @@
       geo.focusDot.setAttribute("cx", px);
       geo.focusDot.setAttribute("cy", py);
       geo.focusDot.setAttribute("visibility", "visible");
-      tooltip.replaceChildren(el("strong", { text: fmtMoney(p.v, currency) }), el("span", { text: fmtDate(p.t) }));
+      // The change from the previous check: normally the day before.
+      const prev = i > 0 ? points[i - 1] : null;
+      const change = prev ? (p.v / prev.v - 1) * 100 : null;
+      const gap = prev ? calendarDays(p.t, prev.t) : null;
+      const vs = gap === 0 ? "vs earlier that day" : gap === 1 ? "vs the day before" : prev ? `vs ${fmtDay(prev.t)}` : "";
+      tooltip.replaceChildren(el("strong", { text: fmtMoney(p.v, currency) }), el("span", { text: fmtDate(p.t) }),
+        prev ? el("span", { class: "tooltip-change" }, deltaNode(change), ` ${vs}`) : null);
       tooltip.hidden = false;
       const half = tooltip.offsetWidth / 2;
       tooltip.style.left = `${Math.min(Math.max(px, half), geo.width - half)}px`;
       tooltip.style.top = `${py}px`;
-      if (announce) live.textContent = `${fmtDate(p.t)}: ${fmtMoney(p.v, currency)}`;
+      if (announce) live.textContent = `${fmtDate(p.t)}: ${fmtMoney(p.v, currency)}${prev ? `, ${fmtSignedPct(change)} ${vs}` : ""}`;
     }
 
     function hidePoint() {
@@ -941,40 +1053,16 @@
     variants: (a) => a.variants,
     cheapest: (a) => (a.num_for_sale === 0 ? null : a.lowest_price),
     usual: (a) => a.usual_price,
-    change: (a) => (a.days_tracked > 1 ? a.change_pct : null),
+    change: (a) => (a.previous_checked_at ? a.day_change_pct : null),
   };
   let wantSort = null; // { key, order } or null for the normal ordering
-
-  function sortWantAlbums(rows) {
-    if (!wantSort) return rows;
-    const value = WANT_VALUE[wantSort.key];
-    const direction = wantSort.order === "asc" ? 1 : -1;
-    return rows
-      .map((album, index) => ({ album, index, v: value(album) }))
-      .sort((x, y) => {
-        if (x.v == null || y.v == null) return (x.v == null) - (y.v == null) || x.index - y.index;
-        const cmp = typeof x.v === "string" ? x.v.localeCompare(y.v) : x.v - y.v;
-        return direction * cmp || x.index - y.index; // ties keep the normal ordering
-      })
-      .map((row) => row.album);
-  }
-
-  function updateWantSortIndicators() {
-    $("want-table").querySelectorAll("thead th[data-wcol]").forEach((th) => {
-      if (wantSort && th.dataset.wcol === wantSort.key) {
-        th.setAttribute("aria-sort", wantSort.order === "asc" ? "ascending" : "descending");
-      } else {
-        th.removeAttribute("aria-sort");
-      }
-    });
-  }
 
   $("want-table").querySelector("thead").addEventListener("click", (event) => {
     const button = event.target.closest("button[data-wsort]");
     if (!button) return;
     const key = button.dataset.wsort;
     wantSort = nextSort(wantSort, key, WANT_FIRST[key][0]);
-    updateWantSortIndicators();
+    updateSortArrows($("want-table"), "data-wcol", wantSort);
     renderWantlist();
   });
   addSortHints($("want-table"), "data-wsort", WANT_FIRST);
@@ -982,10 +1070,9 @@
   function renderWantlist() {
     const q = $("want-search").value.trim().toLowerCase();
     const dealsOnly = $("want-deals-only").checked;
-    const rows = sortWantAlbums(wantAlbums.filter((a) => (!dealsOnly || a.deal)
-      && (!q || `${a.artist} ${a.title}`.toLowerCase().includes(q))));
+    const rows = sortRows(wantAlbums.filter((a) => (!dealsOnly || a.deal)
+      && (!q || `${a.artist} ${a.title}`.toLowerCase().includes(q))), wantSort, WANT_VALUE);
     const link = (href, text) => el("a", { href, target: "_blank", rel: "noopener", text });
-    const sinceDay = (iso) => new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" });
     $("want-rows").replaceChildren(...rows.map((a) => {
       const tr = el("tr", { "data-album": a.album_key, tabindex: "0" });
       const days = a.days_tracked;
@@ -1001,9 +1088,7 @@
           a.num_for_sale ? el("div", { class: "sub", text: `${intFmt.format(a.num_for_sale)} for sale` }) : null),
         el("td", { class: "num", text: a.usual_price != null ? fmtMoney(a.usual_price, a.currency) : "—",
           title: a.usual_price == null ? `Needs ${3 - Math.min(days - 1, 3)} more day(s) of prices` : "Median of the previous 30 days" }),
-        el("td", { class: "num" },
-          days > 1 ? deltaNode(a.change_pct) : el("span", { class: "muted", text: "—", title: "Needs a second day of checks" }),
-          a.first_checked_at ? el("div", { class: "sub", text: `since ${sinceDay(a.first_checked_at)}` }) : null),
+        dayChangeCell(a.day_change_pct, a),
         el("td", {}, el("div", { class: "cell-links" },
           link(a.cd_listings_url, "CD listings ↗"), link(a.album_url, "Album ↗"))));
       return tr;
@@ -1022,23 +1107,21 @@
   $("want-rows").addEventListener("click", (e) => {
     if (e.target.closest("a")) return; // links open Discogs
     const tr = e.target.closest("tr[data-album]");
-    if (tr) openAlbum(tr.dataset.album);
+    if (tr) { lastTrigger = tr; openAlbum(tr.dataset.album); }
   });
   $("want-rows").addEventListener("keydown", (e) => {
     const tr = e.target.closest("tr[data-album]");
-    if (tr && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openAlbum(tr.dataset.album); }
+    if (tr && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); lastTrigger = tr; openAlbum(tr.dataset.album); }
   });
 
   async function openAlbum(key) {
-    $("drawer").hidden = false;
-    document.body.classList.add("drawer-open");
-    $("drawer-body").classList.add("is-loading");
+    showDrawer();
     try {
       const a = await fetchJSON(`/api/me/wantlist/${encodeURIComponent(key)}`);
       $("drawer-eyebrow").textContent = `On your wantlist · ${a.variants} variant${a.variants === 1 ? "" : "s"}`;
       $("drawer-title").textContent = a.title;
       $("drawer-artist").textContent = a.artist;
-      if (chartObserver) chartObserver.disconnect();
+      disconnectCharts();
       const cur = a.currency;
       const row = (label, value, note) => el("tr", {},
         el("th", { scope: "row", text: label }), el("td", { class: "num", text: value }),
@@ -1050,18 +1133,22 @@
             row("Cheapest copy now", a.num_for_sale === 0 ? "none" : fmtMoney(a.lowest_price, cur),
               a.num_for_sale ? `${intFmt.format(a.num_for_sale)} for sale, any pressing or format` : "nothing for sale"),
             row("Usual price", a.usual_price != null ? fmtMoney(a.usual_price, cur) : "—",
-              a.usual_price != null ? "median of the previous 30 days" : "after 3+ days of checks"),
-            row("Change since first check", a.change_pct != null ? fmtSignedPct(a.change_pct) : "—",
+              a.usual_price != null ? "median of the previous 30 days" : "after 3 earlier days of checks"),
+            row("Change since yesterday", a.previous_checked_at ? fmtSignedPct(a.day_change_pct) : "—",
+              a.previous_checked_at ? `vs ${fmtDate(a.previous_checked_at)}` : "after a second day of checks"),
+            row("Change since first check", a.days_tracked > 1 ? fmtSignedPct(a.change_pct) : "—",
               `${a.first_checked_at ? `since ${fmtDate(a.first_checked_at)} · ` : ""}${a.days_tracked} day${a.days_tracked === 1 ? "" : "s"} of checks`))),
+          el("p", { class: "note", text: "Item prices only: Discogs doesn’t share postage costs through its API, so a very cheap copy can still cost more once postage is added. Check the listing before buying." }),
           attribution(a.album_url),
           a.deal ? el("p", { class: "callout", text: `Deal: the cheapest copy is ${Math.round(a.below_usual_pct)}% below its usual price. Check that it's a CD you want.` }) : null,
           el("p", { class: "links" },
             el("a", { href: a.cd_listings_url, target: "_blank", rel: "noopener", text: "CD listings for this album ↗" }),
             el("a", { href: a.album_url, target: "_blank", rel: "noopener", text: "Album on Discogs ↗" }))),
       ];
-      const points = a.history.filter((h) => h.lowest_price != null)
+      const points = a.history.filter((h) => h.lowest_price != null && h.currency === cur)
         .map((h) => ({ t: new Date(h.fetched_at), v: h.lowest_price }));
-      if (points.length >= 2) parts.push(chartFigure(points, cur, "Cheapest copy"));
+      parts.push(points.length >= 2 ? chartFigure(points, cur, "Cheapest copy")
+        : chartPlaceholder("Cheapest copy", "The daily price graph appears after a second day of checks."));
       parts.push(el("section", {},
         el("h3", { class: "section-title", text: `Variants on your wantlist (${a.variants_list.length})` }),
         el("table", { class: "history-table" },
@@ -1112,17 +1199,232 @@
       } else {
         box.replaceChildren(el("p", { class: "note", text: "The chart appears after a second day of tracking." }));
       }
-      $("col-rows").replaceChildren(...data.items.map((i) => el("tr", {},
-        el("td", { class: "title-cell" },
-          el("div", { class: "title" }, el("a", { href: `https://www.discogs.com/release/${i.release_id}`,
-            target: "_blank", rel: "noopener", text: i.title })),
-          el("div", { class: "sub", text: i.artist })),
-        el("td", { text: [i.format, i.label, i.catno].filter(Boolean).join(" · ") || "—" }),
-        el("td", { class: "num", text: i.year || "—" }),
-        el("td", { text: i.date_added ? fmtDate(i.date_added) : "—" }))));
+      collectionItems = data.items;
+      collectionCurrency = data.currency;
+      renderPaidTile(data.paid, data.items.length);
+      renderCollection();
     } catch (error) {
       showAlert(error.message);
     }
+  }
+
+  // Collection sorting works like the wantlist's; the normal ordering is newest first.
+  let collectionItems = [];
+  let collectionCurrency = null;
+  let collectionSort = null;
+  const COLLECTION_FIRST = {
+    title: ["asc", "A to Z", "Z to A"],
+    paid: ["desc", "most expensive first", "cheapest first"],
+    value: ["desc", "most valuable first", "least valuable first"],
+    listed: ["asc", "cheapest first", "most expensive first"],
+    change: ["desc", "biggest rise first", "biggest drop first"],
+    vspaid: ["desc", "biggest gain first", "biggest loss first"],
+    added: ["asc", "oldest first", "normal order"],
+  };
+  const COLLECTION_VALUE = {
+    title: (i) => i.title.toLowerCase(),
+    paid: (i) => i.price_paid,
+    value: (i) => i.nm_price,
+    listed: (i) => (i.num_for_sale === 0 ? null : i.lowest_price),
+    change: (i) => (i.previous_checked_at ? i.day_change_pct : null),
+    vspaid: (i) => i.vs_paid_pct,
+    added: (i) => (i.date_added ? Date.parse(i.date_added) : null),
+  };
+
+  $("collection-table").querySelector("thead").addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-csort]");
+    if (!button) return;
+    const key = button.dataset.csort;
+    collectionSort = nextSort(collectionSort, key, COLLECTION_FIRST[key][0]);
+    updateSortArrows($("collection-table"), "data-ccol", collectionSort);
+    renderCollection();
+  });
+  addSortHints($("collection-table"), "data-csort", COLLECTION_FIRST);
+
+  function renderPaidTile(p, total) {
+    const sub = $("col-paid-sub");
+    if (!p.items) {
+      $("col-paid").textContent = "—";
+      sub.textContent = "click a CD below to add what you paid";
+      return;
+    }
+    $("col-paid").textContent = fmtMoney(p.total, p.currency);
+    sub.replaceChildren(`${p.items} of ${total} CDs${p.shipping ? `, incl. ${fmtMoney(p.shipping, p.currency)} postage` : ""}`);
+    if (p.compared) {
+      sub.append(el("br"), `NM estimates now ${fmtMoney(p.compared_now, p.currency)} vs ${fmtMoney(p.compared_paid, p.currency)} paid `,
+        deltaNode(p.change_pct));
+    }
+    if (p.other_currencies) sub.append(el("br"), `${p.other_currencies} paid in other currencies, not totalled`);
+  }
+
+  /** Why "vs paid" is empty for an item. */
+  function vsPaidHint(i) {
+    if (i.price_paid == null) return "Click the CD to add what you paid";
+    if (i.nm_price == null) return "No NM estimate to compare with yet";
+    if (i.paid_currency !== i.nm_currency) return `Paid in ${i.paid_currency}; estimates are in ${i.nm_currency}`;
+    return "Nothing to compare with";
+  }
+
+  function renderCollection() {
+    const money = (value, currency) => (value == null ? "—" : fmtMoney(value, currency));
+    const rows = sortRows(collectionItems, collectionSort, COLLECTION_VALUE);
+    $("col-rows").replaceChildren(...rows.map((i) => el("tr", { "data-release": i.release_id, tabindex: "0" },
+      el("td", { class: "title-cell" }, el("div", { class: "title", text: i.title }), el("div", { class: "sub", text: i.artist })),
+      el("td", { class: "col-pressing" }, el("div", { text: [i.label, i.catno].filter(Boolean).join(" · ") || "—" }),
+        el("div", { class: "sub", text: [i.format, i.year].filter(Boolean).join(", ") })),
+      el("td", { class: "num" },
+        i.price_paid == null ? el("span", { class: "muted", text: "—", title: vsPaidHint(i) }) : fmtMoney(i.price_paid, i.paid_currency),
+        i.shipping_paid ? el("div", { class: "sub", text: `+ ${fmtMoney(i.shipping_paid, i.paid_currency)} postage` }) : null),
+      el("td", { class: "num", text: money(i.nm_price, i.nm_currency),
+        title: i.nm_price == null ? (i.checked_at ? "Discogs has no Near Mint estimate for this pressing" : "Not priced yet: the next daily run checks it") : null }),
+      el("td", { class: "num" },
+        el("div", { text: i.num_for_sale === 0 ? "none for sale" : money(i.lowest_price, i.lowest_currency) }),
+        i.num_for_sale ? el("div", { class: "sub", text: `${intFmt.format(i.num_for_sale)} for sale` }) : null),
+      dayChangeCell(i.day_change_pct, i),
+      el("td", { class: "num" }, i.vs_paid_pct != null ? deltaNode(i.vs_paid_pct) : el("span", { class: "muted", text: "—", title: vsPaidHint(i) })),
+      el("td", { class: "col-added", text: i.date_added ? fmtDate(i.date_added) : "—" }))));
+    $("col-empty").hidden = rows.length > 0;
+    if (!rows.length) {
+      $("col-empty-text").replaceChildren(richText("No collection synced yet. Run `python -m cd_screener sync-me` (the daily run does this automatically)."));
+    }
+  }
+
+  $("col-rows").addEventListener("click", (e) => {
+    const tr = e.target.closest("tr[data-release]");
+    if (tr) { lastTrigger = tr; openCollectionItem(Number(tr.dataset.release)); }
+  });
+  $("col-rows").addEventListener("keydown", (e) => {
+    const tr = e.target.closest("tr[data-release]");
+    if (tr && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); lastTrigger = tr; openCollectionItem(Number(tr.dataset.release)); }
+  });
+
+  async function openCollectionItem(id) {
+    showDrawer();
+    try {
+      renderCollectionItem(await fetchJSON(`/api/me/collection/${id}`));
+    } catch (error) {
+      $("drawer-body").replaceChildren(el("p", { class: "alert" }, richText(error.message)));
+    } finally {
+      $("drawer-body").classList.remove("is-loading");
+    }
+  }
+
+  function renderCollectionItem(i, status) {
+    $("drawer-eyebrow").textContent = `In your collection${i.date_added ? ` · added ${fmtDate(i.date_added)}` : ""}`;
+    $("drawer-title").textContent = i.title;
+    $("drawer-artist").textContent = i.artist;
+    disconnectCharts();
+    const row = (label, value, note) => el("tr", {},
+      el("th", { scope: "row", text: label }), el("td", { class: "num" }, value),
+      el("td", { class: "note-cell", text: note || "" }));
+    const notChecked = i.checked_at ? null : "not checked yet: the next daily run prices it";
+    const since = i.days_since_previous > 1 ? `vs ${fmtDate(i.previous_checked_at)}` : "vs yesterday";
+    const parts = [
+      el("div", { class: "chips" }, ...[i.format, i.year, [i.label, i.catno].filter(Boolean).join(" · ")]
+        .filter(Boolean).map((text) => el("span", { class: "chip", text }))),
+      el("section", {},
+        el("h3", { class: "section-title", text: "Price check" }),
+        el("table", { class: "market-table" }, el("tbody", {},
+          row("NM estimate now", i.nm_price != null ? fmtMoney(i.nm_price, i.nm_currency) : "—",
+            notChecked || (i.nm_price != null ? "Discogs’ suggested price for a Near Mint copy of this pressing"
+              : "Discogs has no estimate for this pressing")),
+          row("Cheapest copy now", i.num_for_sale === 0 ? "none" : i.lowest_price != null ? fmtMoney(i.lowest_price, i.lowest_currency) : "—",
+            notChecked || (i.num_for_sale ? `${intFmt.format(i.num_for_sale)} for sale, any condition · CD only, no postage` : "nothing for sale")),
+          row("Change since yesterday", i.previous_checked_at ? deltaNode(i.day_change_pct) : "—",
+            i.previous_checked_at
+              ? `NM estimate, ${since}${i.listed_day_change_pct != null ? ` · cheapest copy ${fmtSignedPct(i.listed_day_change_pct)}` : ""}`
+              : "after a second day of checks"),
+          row("When you added it", i.added_nm_price != null ? fmtMoney(i.added_nm_price, i.added_currency) : "—",
+            i.added_checked_at
+              ? `NM estimate on ${fmtDate(i.added_checked_at)}${i.added_lowest_price != null ? ` · cheapest copy ${fmtMoney(i.added_lowest_price, i.added_currency)}` : ""}`
+              : "added before tracking began, and Discogs keeps no price history to look back on"))),
+        attribution(i.discogs_url),
+        el("p", { class: "links" },
+          el("a", { href: i.discogs_url, target: "_blank", rel: "noopener", text: "This pressing on Discogs ↗" }),
+          el("a", { href: i.listings_url, target: "_blank", rel: "noopener", text: "Copies for sale ↗" }))),
+      paidSection(i, row, status),
+    ];
+    const series = (price, currency) => i.history.filter((h) => h[price] != null && h[currency] === i[currency])
+      .map((h) => ({ t: new Date(h.fetched_at), v: h[price] }));
+    const nmPoints = series("nm_price", "nm_currency");
+    const lowPoints = series("lowest_price", "lowest_currency");
+    if (nmPoints.length >= 2) parts.push(chartFigure(nmPoints, i.nm_currency, "NM estimate"));
+    if (lowPoints.length >= 2) parts.push(chartFigure(lowPoints, i.lowest_currency, "Cheapest copy"));
+    if (nmPoints.length < 2 && lowPoints.length < 2) {
+      parts.push(chartPlaceholder("Daily price graph", i.checked_at
+        ? `The graph appears after a second day of checks (first check: ${fmtDate(i.first_checked_at)}).`
+        : "This CD hasn’t been priced yet: the next daily run checks it, and the graph starts the day after."));
+    }
+    $("drawer-body").replaceChildren(...parts);
+  }
+
+  /** What you paid, compared with today's prices, plus the form to add or change it. */
+  function paidSection(i, row, status) {
+    const paid = i.price_paid != null;
+    const cur = i.paid_currency || i.nm_currency || i.lowest_currency || collectionCurrency || "GBP";
+    const field = (label, input) => el("label", { class: "field" }, el("span", { class: "field-label", text: label }), input);
+    const price = el("input", { type: "number", name: "price_paid", min: "0", max: "1000000", step: "0.01",
+      inputmode: "decimal", required: true, value: paid ? i.price_paid : "" });
+    const shipping = el("input", { type: "number", name: "shipping_paid", min: "0", max: "1000000", step: "0.01",
+      inputmode: "decimal", placeholder: "optional", value: i.shipping_paid ?? "" });
+    const currency = el("select", { name: "currency" },
+      ...[...new Set([cur, "GBP", "EUR", "USD", "JPY"])].map((c) => el("option", { value: c, text: c, selected: c === cur })));
+    const day = el("input", { type: "date", name: "purchased_on", max: localISODate(new Date()),
+      value: i.purchased_on || (i.date_added || "").slice(0, 10) });
+    const statusLine = el("p", { class: `form-status${status && status.error ? " is-error" : ""}`, role: "status",
+      text: status ? status.text : "" });
+    const save = el("button", { type: "submit", class: "button-primary", text: paid ? "Update" : "Save" });
+    const remove = paid ? el("button", { type: "button", class: "button-ghost", text: "Remove" }) : null;
+    const form = el("form", { class: "paid-form" },
+      field("Price paid (the CD)", price), field("Postage paid", shipping),
+      field("Currency", currency), field("Date bought", day),
+      el("div", { class: "form-actions" }, save, remove), statusLine);
+
+    async function send(method, payload, done) {
+      [save, remove].forEach((b) => { if (b) b.disabled = true; });
+      try {
+        renderCollectionItem(await sendPurchase(i.release_id, method, payload), { text: done });
+        const again = $("drawer-body").querySelector(".paid-form button[type=submit]");
+        if (again) again.focus();
+        loadCollection(); // refresh the table and the totals
+      } catch (error) {
+        statusLine.textContent = error.message;
+        statusLine.classList.add("is-error");
+        [save, remove].forEach((b) => { if (b) b.disabled = false; });
+      }
+    }
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      send("PUT", { price_paid: price.value, shipping_paid: shipping.value, currency: currency.value,
+        purchased_on: day.value }, "Saved.");
+    });
+    if (remove) remove.addEventListener("click", () => send("DELETE", null, "Removed."));
+
+    const total = paid && i.shipping_paid ? ` + ${fmtMoney(i.shipping_paid, i.paid_currency)} postage = ${fmtMoney(i.price_paid + i.shipping_paid, i.paid_currency)}` : "";
+    const comparison = !paid
+      ? el("p", { class: "note", text: "Add what you paid to compare it with today’s prices. What you enter stays on this computer." })
+      : el("table", { class: "market-table" }, el("tbody", {},
+        row("You paid", fmtMoney(i.price_paid, i.paid_currency),
+          `${i.purchased_on ? `on ${fmtDate(`${i.purchased_on}T00:00`)}` : "date not set"}${total}`),
+        row("NM estimate vs paid", i.vs_paid_pct != null ? deltaNode(i.vs_paid_pct) : "—",
+          i.vs_paid_pct != null ? `${fmtMoney(i.nm_price, i.nm_currency)} now, for the CD alone` : vsPaidHint(i)),
+        row("Cheapest copy vs paid", i.listed_vs_paid_pct != null ? deltaNode(i.listed_vs_paid_pct) : "—",
+          i.listed_vs_paid_pct != null ? `${fmtMoney(i.lowest_price, i.lowest_currency)} now, before postage` : "nothing to compare with yet")));
+    return el("section", {}, el("h3", { class: "section-title", text: "What you paid" }), comparison, form);
+  }
+
+  async function sendPurchase(id, method, payload) {
+    const response = await fetch(`/api/me/collection/${id}/purchase`, {
+      method,
+      headers: payload ? { Accept: "application/json", "Content-Type": "application/json" } : { Accept: "application/json" },
+      body: payload ? JSON.stringify(payload) : undefined,
+    });
+    let body = null;
+    try {
+      body = await response.json();
+    } catch (e) { /* not JSON */ }
+    if (!response.ok) throw new Error((body && body.error) || `Couldn’t save (HTTP ${response.status})`);
+    return body;
   }
 
   // ------------------------------------------------- weekly report (news card)

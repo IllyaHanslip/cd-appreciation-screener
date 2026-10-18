@@ -208,3 +208,59 @@ def test_cli_reports_missing_steps_without_a_traceback(tmp_path, capsys):
     assert main(["--db", path, "seed", "--count", "200"]) == 0
     assert main(["--db", path, "analyze"]) == 1  # seeded but no prices yet
     assert "Funnel" in capsys.readouterr().out
+
+
+def add_collection_item(path, release_id=42):
+    conn = db.connect(path)
+    conn.execute(
+        "INSERT INTO user_items (list, release_id, album_key, artist, title, year, format, label, "
+        "catno, date_added, first_seen, last_seen) VALUES ('collection', ?, ?, 'Mogwai', "
+        "'Mr Beast', 2006, 'CD', 'PIAS', 'PIASR60CD', '2026-06-03T06:18:15-07:00', "
+        "'2026-10-16T00:00:00Z', '2026-10-16T00:00:00Z')", (release_id, f"r{release_id}"))
+    for fetched_at, nm, low in [("2026-10-16T11:00:00Z", 10.0, 3.0), ("2026-10-17T11:00:00Z", 11.0, 2.5)]:
+        conn.execute("INSERT INTO user_item_prices (release_id, fetched_at, nm_price, nm_currency, "
+                     "lowest_price, lowest_currency, num_for_sale) VALUES (?, ?, ?, 'GBP', ?, 'GBP', 4)",
+                     (release_id, fetched_at, nm, low))
+    conn.commit()
+    conn.close()
+
+
+def test_collection_prices_and_purchase_editing(client, db_path):
+    add_collection_item(db_path)
+    body = client.get("/api/me/collection").get_json()
+    item = body["items"][0]
+    assert (item["nm_price"], item["lowest_price"], item["day_change_pct"]) == (11.0, 2.5, 10.0)
+    assert item["price_paid"] is None and body["paid"]["items"] == 0
+    assert len(client.get("/api/me/collection/42").get_json()["history"]) == 2
+    assert client.get("/api/me/collection/999").status_code == 404
+
+    url = "/api/me/collection/42/purchase"
+    saved = client.put(url, json={"price_paid": "8.80", "shipping_paid": 2.2, "currency": "gbp",
+                                  "purchased_on": "2026-06-01"})
+    assert saved.status_code == 200
+    data = saved.get_json()
+    assert (data["price_paid"], data["shipping_paid"], data["paid_currency"]) == (8.8, 2.2, "GBP")
+    assert (data["purchased_on"], data["vs_paid_pct"]) == ("2026-06-01", 25.0)  # 11 now vs 8.80
+    paid = client.get("/api/me/collection").get_json()["paid"]
+    assert (paid["items"], paid["total"], paid["change_pct"]) == (1, 11.0, 25.0)
+
+    for bad in ({"currency": "GBP"}, {"price_paid": -1, "currency": "GBP"},
+                {"price_paid": "lots", "currency": "GBP"}, {"price_paid": True, "currency": "GBP"},
+                {"price_paid": 5, "currency": "pounds"},
+                {"price_paid": 5, "currency": "GBP", "purchased_on": "yesterday"},
+                {"price_paid": 5, "currency": "GBP", "purchased_on": "2999-01-01"}):
+        assert client.put(url, json=bad).status_code == 400, bad
+    assert client.put(url, data="price_paid=5").status_code == 400  # not JSON
+    missing = client.put("/api/me/collection/999/purchase", json={"price_paid": 5, "currency": "GBP"})
+    assert missing.status_code == 404
+
+    # Other websites can't change your data through the local server.
+    evil = {"Origin": "https://evil.example"}
+    assert client.put(url, json={"price_paid": 1, "currency": "GBP"}, headers=evil).status_code == 403
+    assert client.delete(url, headers=evil).status_code == 403
+    rebound = client.put(url, json={"price_paid": 1, "currency": "GBP"}, base_url="http://evil.example")
+    assert rebound.status_code == 403
+    assert client.get("/api/me/collection/42").get_json()["price_paid"] == 8.8
+
+    cleared = client.delete(url, headers={"Origin": "http://127.0.0.1:5000"})
+    assert cleared.status_code == 200 and cleared.get_json()["price_paid"] is None
