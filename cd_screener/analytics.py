@@ -403,7 +403,8 @@ def market_signals(
                 m.at[rid, "reissue_reason"] = reason
 
     for col in ("discount_vs_usual_pct", "discount_vs_estimate_pct"):
-        m[col] = m[col].round(1)
+        # pd.to_numeric: with nothing listed, pandas 2 makes an all-empty column object dtype.
+        m[col] = pd.to_numeric(m[col]).round(1)
     return m
 
 
