@@ -1,0 +1,33 @@
+# Continuous integration: runs the test suite on every push and pull request.
+# The tests use temporary databases and fake Discogs responses, so no token or secrets
+# are needed and no Discogs data is involved.
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:  # a "Run workflow" button on the Actions tab
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    name: pytest (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]  # Linux for portability, Windows like the daily task
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Run tests
+        run: python -m pytest -q
