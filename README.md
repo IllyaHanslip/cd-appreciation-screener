@@ -1,5 +1,7 @@
 # CD Market Appreciation Screener
 
+[![Tests](https://github.com/IllyaHanslip/cd-appreciation-screener/actions/workflows/tests.yml/badge.svg)](https://github.com/IllyaHanslip/cd-appreciation-screener/actions/workflows/tests.yml)
+
 A data pipeline and dashboard that finds physical music CDs that are **scarce** (far more
 collectors want them than own them) and tracks whether they are **appreciating**, using
 live data from the Discogs marketplace API.
@@ -64,8 +66,9 @@ of daily data exists (mid-November 2026).
 - **Product:** a Flask JSON API and a dependency-free JavaScript dashboard with
   accessible SVG charts, frozen weekly reports, and a Windows scheduled job with desktop
   notifications.
-- **Quality:** 69 automated tests that never touch the network; rate-limit and retry
-  behaviour is tested with a fake clock.
+- **Quality:** 77 automated tests that never touch the network; rate-limit and retry
+  behaviour is tested with a fake clock. GitHub Actions runs them on every push (Linux and
+  Windows, Python 3.10 and 3.12).
 
 ```
  Discogs search ──► SQLite ──► funnel filter ──────► rate-limited daily ──► pandas ─────► Flask API + dashboard
@@ -238,6 +241,7 @@ Invalid parameters return `400` with an explanation. A missing or empty database
 
 ```
 cd-appreciation-screener/
+├── .github/workflows/      CI: runs the tests on every push (GitHub Actions)
 ├── cd_screener/
 │   ├── __main__.py         CLI: seed / ingest / fetch-prices / analyze / serve / demo
 │   ├── config.py           all thresholds, limits and paths (+ .env loading)
@@ -280,7 +284,10 @@ python -m pytest
 ```
 
 The tests run against temporary databases and fake HTTP sessions with a fake clock, so
-they never touch the network or actually wait out a rate limit.
+they never touch the network or actually wait out a rate limit. They need no Discogs token,
+so [GitHub Actions](.github/workflows/tests.yml) runs the same suite on every push and pull
+request: on Linux and Windows with Python 3.12, and on Linux with Python 3.10, the oldest
+supported version.
 
 ---
 
