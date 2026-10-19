@@ -50,8 +50,13 @@ def _today_start() -> str:
     return midnight.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _parse_time(iso: str) -> datetime:
+    """ISO-8601 text to a datetime, accepting a trailing 'Z' (needed before Python 3.11)."""
+    return datetime.fromisoformat(iso.replace("Z", "+00:00"))
+
+
 def _local_day(iso: str) -> date:
-    return datetime.fromisoformat(iso).astimezone().date()
+    return _parse_time(iso).astimezone().date()
 
 
 def _last_per_day(history: list[dict]) -> list[dict]:
@@ -405,13 +410,13 @@ def _value_when_added(date_added: str | None, daily: list[dict]) -> dict | None:
     if not date_added:
         return None
     try:
-        added = datetime.fromisoformat(date_added)
+        added = _parse_time(date_added)
     except ValueError:
         return None
     if added.tzinfo is None:
         added = added.replace(tzinfo=timezone.utc)
     for h in daily:
-        checked = datetime.fromisoformat(h["fetched_at"])
+        checked = _parse_time(h["fetched_at"])
         if checked >= added:
             return h if checked - added <= timedelta(days=config.ADDED_WINDOW_DAYS) else None
     return None

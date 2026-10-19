@@ -14,17 +14,21 @@ permissions:
 
 jobs:
   pytest:
-    name: pytest (${{ matrix.os }})
+    name: pytest (${{ matrix.os }}, Python ${{ matrix.python }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]  # Linux for portability, Windows like the daily task
+        python: ["3.12"]
+        include:
+          - os: ubuntu-latest
+            python: "3.10"  # the oldest version the README promises
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python }}
           cache: pip
           cache-dependency-path: requirements*.txt
       - name: Install dependencies
