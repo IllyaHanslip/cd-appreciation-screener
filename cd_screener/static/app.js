@@ -191,11 +191,14 @@
     return n + (suffixes[(v - 20) % 10] || suffixes[v] || suffixes[0]);
   }
 
+  /** For prices you'd pay (the wantlist): a rise is bad news, so it shows red and a fall green. */
+  const LOWER_IS_BETTER = { lowerIsBetter: true };
+
   /** Signed % with a direction icon. Color is never the only cue: icon + sign carry it too. */
-  function deltaNode(value) {
+  function deltaNode(value, { lowerIsBetter = false } = {}) {
     if (value == null) return el("span", { class: "muted", text: "—" });
     const dir = value > 0.05 ? "up" : value < -0.05 ? "down" : "flat";
-    const node = el("span", { class: `delta is-${dir}` });
+    const node = el("span", { class: `delta is-${dir}${lowerIsBetter ? " lower-is-better" : ""}` });
     if (dir !== "flat") {
       node.append(el("span", { class: "delta-icon", "aria-hidden": "true", text: dir === "up" ? "▲" : "▼" }));
     }
@@ -205,11 +208,11 @@
 
   /** Change since last week (rolling). Until there's a week of checks, or after the PC
    *  was off a week ago, it says which day it compares with. */
-  function weekChangeCell(value, item) {
+  function weekChangeCell(value, item, opts) {
     if (!item.week_since) {
       return el("td", { class: "num" }, el("span", { class: "muted", text: "—", title: "Shows after a second day of checks" }));
     }
-    return el("td", { class: "num" }, deltaNode(value),
+    return el("td", { class: "num" }, deltaNode(value, opts),
       item.week_days !== 7 ? el("div", { class: "sub", text: `since ${fmtDay(item.week_since)}` }) : null);
   }
 
@@ -664,7 +667,7 @@
 
   let chartCount = 0; // unique ids for each chart's data table
 
-  function chartFigure(points, currency, title = "Near Mint price") {
+  function chartFigure(points, currency, title = "Near Mint price", opts) {
     const days = calendarDays(points[points.length - 1].t, points[0].t) + 1;
     const container = el("div", {
       class: "chart",
@@ -673,7 +676,7 @@
       "aria-label": `${title} over ${days} days, ${points.length} observations. Use the arrow keys to read values.`,
     });
     const live = el("p", { class: "sr-only", "aria-live": "polite" });
-    const table = historyTable(points, currency, title);
+    const table = historyTable(points, currency, title, opts);
     table.id = `history-table-${++chartCount}`;
     table.hidden = true;
     const toggle = el("button", {
@@ -685,7 +688,7 @@
       toggle.setAttribute("aria-expanded", String(!table.hidden));
       toggle.textContent = table.hidden ? "Show daily prices" : "Hide daily prices";
     });
-    chartObservers.push(attachChart(container, live, points, currency));
+    chartObservers.push(attachChart(container, live, points, currency, opts));
     return el("figure", { class: "chart-card" },
       el("figcaption", {},
         el("span", { class: "chart-title", text: title }),
@@ -768,13 +771,13 @@
   }
 
   /** Newest first, with each day's change from the check before it. */
-  function historyTable(points, currency, valueLabel = "Near Mint price") {
+  function historyTable(points, currency, valueLabel = "Near Mint price", opts) {
     const rows = points.map((p, i) => {
       const prev = points[i - 1];
       return el("tr", {},
         el("td", { text: fmtDate(p.t) }),
         el("td", { class: "num", text: fmtMoney(p.v, currency) }),
-        el("td", { class: "num" }, prev ? deltaNode((p.v / prev.v - 1) * 100) : el("span", { class: "muted", text: "—" }),
+        el("td", { class: "num" }, prev ? deltaNode((p.v / prev.v - 1) * 100, opts) : el("span", { class: "muted", text: "—" }),
           prev ? el("span", { class: "muted", text: ` ${fmtSignedMoney(p.v - prev.v, currency)}` }) : null));
     }).reverse();
     return el("table", { class: "history-table" },
@@ -842,7 +845,7 @@
     return ticks;
   }
 
-  function attachChart(container, live, points, currency) {
+  function attachChart(container, live, points, currency, opts) {
     const tooltip = el("div", { class: "chart-tooltip", hidden: true });
     let geo = null;
     let focusIndex = null;
@@ -950,7 +953,7 @@
       const gap = prev ? calendarDays(p.t, prev.t) : null;
       const vs = gap === 0 ? "vs earlier that day" : gap === 1 ? "vs the day before" : prev ? `vs ${fmtDay(prev.t)}` : "";
       tooltip.replaceChildren(el("strong", { text: fmtMoney(p.v, currency) }), el("span", { text: fmtDate(p.t) }),
-        prev ? el("span", { class: "tooltip-change" }, deltaNode(change), ` ${vs}`) : null);
+        prev ? el("span", { class: "tooltip-change" }, deltaNode(change, opts), ` ${vs}`) : null);
       tooltip.hidden = false;
       const half = tooltip.offsetWidth / 2;
       tooltip.style.left = `${Math.min(Math.max(px, half), geo.width - half)}px`;
@@ -1098,7 +1101,7 @@
           a.num_for_sale ? el("div", { class: "sub", text: `${intFmt.format(a.num_for_sale)} for sale` }) : null),
         el("td", { class: "num", text: a.usual_price != null ? fmtMoney(a.usual_price, a.currency) : "—",
           title: a.usual_price == null ? `Needs ${3 - Math.min(days - 1, 3)} more day(s) of prices` : "Median of the previous 30 days" }),
-        weekChangeCell(a.week_change_pct, a),
+        weekChangeCell(a.week_change_pct, a, LOWER_IS_BETTER),
         el("td", {}, el("div", { class: "cell-links" },
           link(a.cd_listings_url, "CD listings ↗"), link(a.album_url, "Album ↗"))));
       return tr;
@@ -1157,7 +1160,7 @@
       ];
       const points = a.history.filter((h) => h.lowest_price != null && h.currency === cur)
         .map((h) => ({ t: new Date(h.fetched_at), v: h.lowest_price }));
-      parts.push(points.length >= 2 ? chartFigure(points, cur, "Cheapest copy")
+      parts.push(points.length >= 2 ? chartFigure(points, cur, "Cheapest copy", LOWER_IS_BETTER)
         : chartPlaceholder("Cheapest copy", "The daily price graph appears after a second day of checks."));
       parts.push(el("section", {},
         el("h3", { class: "section-title", text: `Variants on your wantlist (${a.variants_list.length})` }),
